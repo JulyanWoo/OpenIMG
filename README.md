@@ -84,7 +84,7 @@ La cuenta de GPT se autentica dentro de WebView2. La sesión es local al usuario
 
 ## Licencia y distribución
 
-No se ha seleccionado una licencia para el proyecto. La presencia pública del repositorio no concede por sí sola permiso para reutilizar o redistribuir el código. Consulta [LICENSE_DECISION_REQUIRED.md](LICENSE_DECISION_REQUIRED.md). El modelo detector opcional y los iconos locales no se incluyen en este snapshot porque sus condiciones de distribución no están resueltas.
+El código propio de OpenIMG se publica bajo la licencia MIT; consulta [LICENSE](LICENSE). Las dependencias conservan sus propias licencias y avisos, descritos en [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). El modelo YOLO y el icono local están excluidos de este snapshot y no deben añadirse a un paquete público sin resolver por separado sus condiciones y procedencia. La documentación de [licenciamiento](LICENSING.md) resume ese alcance.
 
 ## Aviso
 
