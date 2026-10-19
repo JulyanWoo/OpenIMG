@@ -1,0 +1,303 @@
+<Window x:Class="OpenIMG.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+        xmlns:controls="clr-namespace:OpenIMG.App.Controls"
+        Title="OpenIMG — Restauración de fotografías de muebles"
+        Height="940" Width="1640" MinHeight="720" MinWidth="1180"
+        WindowStartupLocation="CenterScreen"
+        Background="#0B0E13" Foreground="#F3F4F6">
+    <Window.Resources>
+        <ResourceDictionary Source="/Themes/DarkTheme.xaml" />
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="58" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="72" />
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0" Background="#121720" BorderBrush="#28313F" BorderThickness="0,0,0,1" Padding="18,0">
+            <DockPanel LastChildFill="True">
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" DockPanel.Dock="Left">
+                    <StackPanel VerticalAlignment="Center">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="OpenIMG" FontWeight="Bold" FontSize="15" Foreground="White" />
+                            <TextBlock Text="{Binding ReleaseVersion, StringFormat='v{0}'}" FontSize="10" Foreground="#8F9BAD" VerticalAlignment="Center" Margin="7,1,0,0" />
+                        </StackPanel>
+                        <TextBlock Text="Restauración fotográfica conservadora" FontSize="10" Foreground="#8F9BAD" Margin="0,2,0,0" />
+                    </StackPanel>
+                    <Border Background="#2B3442" Width="1" Height="24" Margin="18,0" />
+                    <TextBlock Text="{Binding CurrentProject.Name, TargetNullValue='Biblioteca local'}"
+                               FontSize="12" Foreground="#CDD5E1" VerticalAlignment="Center" />
+                </StackPanel>
+
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <Border Background="#1B222D" CornerRadius="16" Padding="10,6" Margin="0,0,10,0"
+                            BorderBrush="#303B4A" BorderThickness="1">
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse Width="8" Height="8" Margin="0,0,7,0" VerticalAlignment="Center">
+                                <Ellipse.Style>
+                                    <Style TargetType="Ellipse">
+                                        <Setter Property="Fill" Value="#F59E0B" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsGptReady}" Value="True">
+                                                <Setter Property="Fill" Value="#34D399" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Ellipse.Style>
+                            </Ellipse>
+                            <TextBlock Text="{Binding GptStatusText}" FontSize="10" Foreground="#D6DCE6" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Border>
+                    <Button Content="GPT Web" Command="{Binding ToggleBrowserCommand}" Margin="0,0,8,0" Padding="12,7" />
+                    <Button Content="Ajustes" Click="OnOpenSettingsClicked" Padding="12,7" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="292" MinWidth="245" MaxWidth="360" />
+                <ColumnDefinition Width="*" MinWidth="440" />
+                <ColumnDefinition x:Name="BrowserColumn" Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0" Background="#11161E" BorderBrush="#28313F" BorderThickness="0,0,1,0">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <Border Grid.Row="0" Padding="16,16,16,13" BorderBrush="#252E3A" BorderThickness="0,0,0,1">
+                        <StackPanel>
+                            <TextBlock Text="BIBLIOTECA" FontSize="10" FontWeight="Bold" Foreground="#7F8CA0" Margin="1,0,0,10" />
+                            <Button Content="＋   Importar fotos" Style="{StaticResource AccentButton}"
+                                    Command="{Binding ImportFolderCommand}" HorizontalAlignment="Stretch" Height="40" />
+                            <TextBlock Text="{Binding CurrentProject.SourceDirectory, TargetNullValue='Selecciona una carpeta para importar'}"
+                                       Foreground="#8793A5" FontSize="10" TextTrimming="CharacterEllipsis"
+                                       ToolTip="{Binding CurrentProject.SourceDirectory}" Margin="2,9,2,0" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border Grid.Row="1" Padding="12,10" BorderBrush="#252E3A" BorderThickness="0,0,0,1">
+                        <StackPanel>
+                            <TextBlock Text="VISTAS" FontSize="10" FontWeight="Bold" Foreground="#7F8CA0" Margin="2,0,0,7" />
+                            <WrapPanel>
+                                <Button Content="{Binding TotalCount, StringFormat='Todas  {0}'}" Command="{Binding SetFilterCommand}"
+                                        CommandParameter="All" Margin="0,2,5,2" Padding="9,5" FontSize="10" />
+                                <Button Content="{Binding PendingCount, StringFormat='Pendientes  {0}'}" Command="{Binding SetFilterCommand}"
+                                        CommandParameter="Pending" Margin="0,2,5,2" Padding="9,5" FontSize="10" />
+                                <Button Content="{Binding ProcessingCount, StringFormat='En curso  {0}'}" Command="{Binding SetFilterCommand}"
+                                        CommandParameter="Processing" Margin="0,2,5,2" Padding="9,5" FontSize="10" />
+                                <Button Content="{Binding ReviewCount, StringFormat='Revisión  {0}'}" Command="{Binding SetFilterCommand}"
+                                        CommandParameter="Review" Margin="0,2,5,2" Padding="9,5" FontSize="10" />
+                                <Button Content="{Binding AcceptedCount, StringFormat='Aceptadas  {0}'}" Command="{Binding SetFilterCommand}"
+                                        CommandParameter="Accepted" Margin="0,2,5,2" Padding="9,5" FontSize="10" />
+                                <Button Content="{Binding FailedCount, StringFormat='Fallidas  {0}'}" Command="{Binding SetFilterCommand}"
+                                        CommandParameter="Failed" Margin="0,2,5,2" Padding="9,5" FontSize="10" />
+                            </WrapPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <Grid Grid.Row="2" Margin="0,0,0,0">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <DockPanel Grid.Row="0" Margin="15,13,13,7">
+                            <TextBlock Text="FOTOS" FontSize="10" FontWeight="Bold" Foreground="#7F8CA0" />
+                            <TextBlock Text="{Binding FilteredAssets.Count, StringFormat=' {0}'}" FontSize="10" Foreground="#64748B" />
+                        </DockPanel>
+                        <ListBox Grid.Row="1" Background="Transparent" BorderThickness="0"
+                                 ItemsSource="{Binding FilteredAssets}"
+                                 SelectedItem="{Binding SelectedAsset, Mode=TwoWay}"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                 VirtualizingPanel.IsVirtualizing="True"
+                                 VirtualizingPanel.VirtualizationMode="Recycling">
+                            <ListBox.ItemContainerStyle>
+                                <Style TargetType="ListBoxItem">
+                                    <Setter Property="Padding" Value="8" />
+                                    <Setter Property="Margin" Value="7,2" />
+                                    <Setter Property="Background" Value="#151B24" />
+                                    <Setter Property="BorderBrush" Value="#202A37" />
+                                    <Setter Property="BorderThickness" Value="1" />
+                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                    <Setter Property="Template">
+                                        <Setter.Value>
+                                            <ControlTemplate TargetType="ListBoxItem">
+                                                <Border Background="{TemplateBinding Background}"
+                                                        BorderBrush="{TemplateBinding BorderBrush}"
+                                                        BorderThickness="{TemplateBinding BorderThickness}"
+                                                        CornerRadius="8" Padding="{TemplateBinding Padding}">
+                                                    <ContentPresenter />
+                                                </Border>
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsSelected" Value="True">
+                                                        <Setter Property="Background" Value="#1C2A40" />
+                                                        <Setter Property="BorderBrush" Value="#3478E5" />
+                                                    </Trigger>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter Property="Background" Value="#1B2330" />
+                                                    </Trigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </Setter.Value>
+                                    </Setter>
+                                </Style>
+                            </ListBox.ItemContainerStyle>
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="62" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Border Grid.Column="0" Width="54" Height="60" Background="#0B0F15"
+                                                CornerRadius="6" BorderBrush="#313B49" BorderThickness="1">
+                                            <Image Source="{Binding ThumbnailPath}" Stretch="UniformToFill" />
+                                        </Border>
+                                        <StackPanel Grid.Column="1" Margin="10,1,0,0" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding FileName}" FontWeight="SemiBold" FontSize="11"
+                                                       Foreground="#EEF2F7" TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Text="{Binding DimensionsText}" FontSize="10" Foreground="#8793A5" Margin="0,3,0,6" />
+                                            <StackPanel Orientation="Horizontal">
+                                                <Border Background="{Binding StatusBadgeColor}" CornerRadius="4" Padding="6,2" Margin="0,0,6,0">
+                                                    <TextBlock Text="{Binding Status}" Foreground="White" FontSize="9" FontWeight="Bold" />
+                                                </Border>
+                                                <TextBlock Text="{Binding AttemptCount, StringFormat='Intentos: {0}'}"
+                                                           FontSize="9" Foreground="#718096" VerticalAlignment="Center" />
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Grid>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </Grid>
+
+                    <Border Grid.Row="3" Background="#151B24" BorderBrush="#28313F" BorderThickness="0,1,0,0" Padding="14,10">
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse Width="7" Height="7" Fill="#34D399" Margin="0,0,8,0" VerticalAlignment="Center" />
+                            <TextBlock Text="Originales protegidos" FontSize="10" Foreground="#A6B0BF" />
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </Border>
+
+            <Grid Grid.Column="1" Background="#0B0E13">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="70" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <Border Grid.Row="0" Background="#11161E" BorderBrush="#28313F" BorderThickness="0,0,0,1" Padding="20,0">
+                    <DockPanel LastChildFill="True">
+                        <Button Content="Abrir revisión" Click="OnOpenReviewClicked" DockPanel.Dock="Right"
+                                VerticalAlignment="Center" Padding="13,8" />
+                        <StackPanel VerticalAlignment="Center">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="{Binding SelectedAsset.FileName, TargetNullValue='Selecciona una fotografía'}"
+                                           FontWeight="Bold" FontSize="14" Foreground="#F8FAFC" />
+                                <Border Background="{Binding SelectedAsset.StatusBadgeColor}" CornerRadius="5"
+                                        Padding="7,3" Margin="11,0,0,0" VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding SelectedAsset.Status, TargetNullValue='Sin selección'}"
+                                               Foreground="White" FontSize="9" FontWeight="Bold" />
+                                </Border>
+                            </StackPanel>
+                            <TextBlock Text="{Binding SelectedAsset.OriginalFilePath, TargetNullValue='La comparación original / GPT aparecerá aquí'}"
+                                       FontSize="10" Foreground="#8490A1" TextTrimming="CharacterEllipsis" Margin="0,4,12,0" />
+                        </StackPanel>
+                    </DockPanel>
+                </Border>
+
+                <Border Grid.Row="1" Margin="14" Background="#080A0F" CornerRadius="12"
+                        BorderBrush="#252E3A" BorderThickness="1" ClipToBounds="True">
+                    <controls:ImageComparisonSlider OriginalImageSource="{Binding SelectedOriginalBitmap}"
+                                                    RestoredImageSource="{Binding SelectedRestoredBitmap}"
+                                                    OriginalStatusText="{Binding OriginalPreviewMessage}"
+                                                    RestoredStatusText="{Binding RestoredPreviewMessage}" />
+                </Border>
+            </Grid>
+
+            <Border Grid.Column="2" Width="390" MinWidth="330" MaxWidth="520"
+                    Background="#11161E" BorderBrush="#28313F" BorderThickness="1,0,0,0">
+                <Border.Style>
+                    <Style TargetType="Border">
+                        <Setter Property="Visibility" Value="Visible" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsBrowserVisible}" Value="False">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="58" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Border Grid.Row="0" Background="#151B24" BorderBrush="#28313F" BorderThickness="0,0,0,1" Padding="15,0">
+                        <DockPanel>
+                            <Button Content="Ocultar" DockPanel.Dock="Right" Command="{Binding ToggleBrowserCommand}"
+                                    Padding="9,5" FontSize="10" VerticalAlignment="Center" />
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <Border Background="#1E2D46" CornerRadius="7" Width="30" Height="30" Margin="0,0,10,0">
+                                    <TextBlock Text="✦" Foreground="#8AB4FF" FontSize="16"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Text="Asistente GPT" FontSize="12" FontWeight="Bold" Foreground="#F0F4FA" />
+                                    <TextBlock Text="Sesión del proveedor" FontSize="9" Foreground="#8490A1" Margin="0,2,0,0" />
+                                </StackPanel>
+                            </StackPanel>
+                        </DockPanel>
+                    </Border>
+                    <TabControl x:Name="ProviderTabs" Grid.Row="1" Background="#0B0E13" BorderThickness="0">
+                        <TabItem Header="GPT Web" Background="#151B24" Foreground="#DDE5F0">
+                            <wv2:WebView2 x:Name="GptWebView" />
+                        </TabItem>
+                    </TabControl>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <Border Grid.Row="2" Background="#11161E" BorderBrush="#28313F" BorderThickness="0,1,0,0" Padding="14,10">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button Content="▶  Iniciar cola" Style="{StaticResource AccentButton}"
+                            Command="{Binding StartQueueCommand}" Margin="0,0,7,0" Padding="12,8" />
+                    <Button Content="Pausar" Command="{Binding PauseQueueCommand}" Margin="0,0,7,0" Padding="11,8" />
+                    <Button Content="Continuar" Command="{Binding ResumeQueueCommand}" Margin="0,0,7,0" Padding="11,8" />
+                    <Button Content="Cancelar" Style="{StaticResource DangerButton}"
+                            Command="{Binding CancelCurrentCommand}" Margin="0,0,7,0" Padding="11,8" />
+                    <Button Content="Reintentar foto" Command="{Binding RetrySelectedCommand}" Padding="11,8" />
+                    <Button Content="Reiniciar estados" Click="OnResetAllProcessingStatesClicked"
+                            Margin="7,0,0,0" Padding="11,8"
+                            ToolTip="Devuelve todas las fotos de esta biblioteca a Pendiente y conserva intentos y resultados." />
+                </StackPanel>
+                <Grid Grid.Column="1" VerticalAlignment="Center" Margin="22,0,0,0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <DockPanel Grid.Row="0" Margin="0,0,0,6">
+                        <TextBlock Text="{Binding QueueStatusText}" FontSize="10" Foreground="#C5CEDA"
+                                   TextTrimming="CharacterEllipsis" />
+                        <TextBlock Text="GPT · Barrier 3 · revisión humana" FontSize="9" Foreground="#7F8CA0"
+                                   HorizontalAlignment="Right" />
+                    </DockPanel>
+                    <ProgressBar Grid.Row="1" Height="5" Background="#202734" Foreground="#3478E5"
+                                 BorderThickness="0" IsIndeterminate="{Binding IsQueueRunning}" />
+                </Grid>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

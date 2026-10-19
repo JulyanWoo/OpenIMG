@@ -1,0 +1,177 @@
+<Window x:Class="OpenIMG.App.Views.SettingsDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:coreEnums="clr-namespace:OpenIMG.Core.Enums;assembly=OpenIMG.Core"
+        Title="OpenIMG Product Settings" Height="800" Width="700"
+        WindowStartupLocation="CenterOwner"
+        Background="#121418" Foreground="#F3F4F6">
+    <Window.Resources>
+        <ResourceDictionary Source="/Themes/DarkTheme.xaml" />
+    </Window.Resources>
+
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Text="OPENIMG SETTINGS" FontWeight="Bold" FontSize="16" Foreground="#3B82F6" Margin="0,0,0,16" />
+
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <!-- Directories & Persistence -->
+                <TextBlock Text="Storage Paths" FontWeight="Bold" FontSize="13" Foreground="#9CA3AF" Margin="0,0,0,8" />
+                <Border Background="#1A1D24" CornerRadius="6" Padding="14" Margin="0,0,0,16" BorderBrush="#2D3442" BorderThickness="1">
+                    <StackPanel>
+                        <TextBlock Text="Folder for restored images:" Foreground="#9CA3AF" FontSize="11" Margin="0,0,0,4" />
+                        <DockPanel LastChildFill="True" Margin="0,0,0,6">
+                            <Button DockPanel.Dock="Right" Content="Browse..." Click="OnBrowseOutputFolderClicked" Padding="10,6" Margin="8,0,0,0" />
+                            <TextBox Text="{Binding DefaultOutputDirectory, UpdateSourceTrigger=PropertyChanged}"
+                                     IsReadOnly="True"
+                                     Background="#161920" Foreground="#F3F4F6" BorderBrush="#2D3442" Padding="6"
+                                     ToolTip="Select where new restored images and their metadata will be saved." />
+                        </DockPanel>
+                        <TextBlock Text="New results use this folder (with OpenIMG subfolders). Originals and existing results are not moved. The active library and future libraries will use this location."
+                                   Foreground="#9CA3AF" FontSize="10" TextWrapping="Wrap" Margin="0,0,0,6" />
+                        <TextBlock Text="{Binding StorageErrorMessage}" Foreground="#F87171" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10" />
+
+                        <TextBlock Text="Database Path (SQLite):" Foreground="#9CA3AF" FontSize="11" Margin="0,0,0,4" />
+                        <TextBox Text="{Binding DatabasePath, UpdateSourceTrigger=PropertyChanged}" Background="#161920" Foreground="#F3F4F6" BorderBrush="#2D3442" Padding="6" Margin="0,0,0,10" />
+
+                        <TextBlock Text="GPT WebView2 Persistent Profile:" Foreground="#9CA3AF" FontSize="11" Margin="0,0,0,4" />
+                        <TextBox Text="{Binding GptWebView2ProfilePath, UpdateSourceTrigger=PropertyChanged}" Background="#161920" Foreground="#F3F4F6" BorderBrush="#2D3442" Padding="6" />
+                    </StackPanel>
+                </Border>
+
+                <!-- Independent restoration controls: photo quality, loose clutter, and people. -->
+                <TextBlock Text="Restoration &amp; Cleanup" FontWeight="Bold" FontSize="13" Foreground="#9CA3AF" Margin="0,0,0,8" />
+                <Border Background="#1A1D24" CornerRadius="6" Padding="14" Margin="0,0,0,16" BorderBrush="#2D3442" BorderThickness="1">
+                    <StackPanel>
+                        <TextBlock Text="Photographic enhancement" Foreground="#F3F4F6" Margin="0,0,0,4" />
+                        <ComboBox SelectedValue="{Binding PhotographicEnhancementProfile, Mode=TwoWay}" SelectedValuePath="Tag" Margin="0,0,0,4">
+                            <ComboBoxItem Content="Light" Tag="{x:Static coreEnums:PhotographicEnhancementProfile.Light}" />
+                            <ComboBoxItem Content="Moderate" Tag="{x:Static coreEnums:PhotographicEnhancementProfile.Moderate}" />
+                            <ComboBoxItem Content="Strong (recommended)" Tag="{x:Static coreEnums:PhotographicEnhancementProfile.Strong}" />
+                        </ComboBox>
+                        <TextBlock Text="Controls photo quality only: clarity, exposure, contrast, color and noise." Foreground="#9CA3AF" FontSize="10" TextWrapping="Wrap" Margin="0,0,0,12" />
+
+                        <TextBlock Text="Temporary clutter cleanup" Foreground="#F3F4F6" Margin="0,0,0,4" />
+                        <ComboBox SelectedValue="{Binding SceneCleanupMode, Mode=TwoWay}" SelectedValuePath="Tag" Margin="0,0,0,4">
+                            <ComboBoxItem Content="Disabled" Tag="{x:Static coreEnums:SceneCleanupMode.Disabled}" />
+                            <ComboBoxItem Content="Remove only clearly temporary objects (recommended)" Tag="{x:Static coreEnums:SceneCleanupMode.SafeTemporaryOnly}" />
+                            <ComboBoxItem Content="Strong cleanup of clearly temporary objects" Tag="{x:Static coreEnums:SceneCleanupMode.StrongTemporaryCleanup}" />
+                        </ComboBox>
+                        <TextBlock Text="Detection helps identify objects, but cleanup does not depend on the detector finding them. Uncertain or permanent objects are preserved." Foreground="#9CA3AF" FontSize="10" TextWrapping="Wrap" Margin="0,0,0,12" />
+
+                        <TextBlock Text="People in the photo" Foreground="#F3F4F6" Margin="0,0,0,4" />
+                        <ComboBox SelectedValue="{Binding PersonRemovalMode, Mode=TwoWay}" SelectedValuePath="Tag" Margin="0,0,0,4">
+                            <ComboBoxItem Content="Preserve people (recommended)" Tag="{x:Static coreEnums:PersonRemovalMode.Disabled}" />
+                            <ComboBoxItem Content="Remove only when clearly separate and safe" Tag="{x:Static coreEnums:PersonRemovalMode.SafeWhenClearlyTemporary}" />
+                        </ComboBox>
+                        <TextBlock Text="A person touching or obscuring furniture is preserved to avoid inventing hidden structure." Foreground="#9CA3AF" FontSize="10" TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+
+                <!-- Processing Policy -->
+                <TextBlock Text="Processing &amp; Retry Policy" FontWeight="Bold" FontSize="13" Foreground="#9CA3AF" Margin="0,0,0,8" />
+                <Border Background="#1A1D24" CornerRadius="6" Padding="14" Margin="0,0,0,16" BorderBrush="#2D3442" BorderThickness="1">
+                    <StackPanel>
+                        <DockPanel Margin="0,0,0,8">
+                            <TextBlock Text="Max Automatic Restoration Attempts:" Foreground="#F3F4F6" VerticalAlignment="Center" />
+                            <TextBox Text="{Binding MaxAutomaticAttempts, UpdateSourceTrigger=PropertyChanged}" Width="80" HorizontalAlignment="Right" Background="#161920" Foreground="#F3F4F6" BorderBrush="#2D3442" Padding="4" />
+                        </DockPanel>
+
+                        <DockPanel Margin="0,0,0,8">
+                            <TextBlock Text="Page Load Timeout (seconds):" Foreground="#F3F4F6" VerticalAlignment="Center" />
+                            <TextBox Text="{Binding PageLoadTimeoutSeconds, UpdateSourceTrigger=PropertyChanged}" Width="80" HorizontalAlignment="Right" Background="#161920" Foreground="#F3F4F6" BorderBrush="#2D3442" Padding="4" />
+                        </DockPanel>
+
+                        <DockPanel>
+                            <TextBlock Text="GPT Image Generation Timeout (seconds):" Foreground="#F3F4F6" VerticalAlignment="Center" />
+                            <TextBox Text="{Binding ResponseTimeoutSeconds, UpdateSourceTrigger=PropertyChanged}" Width="80" HorizontalAlignment="Right" Background="#161920" Foreground="#F3F4F6" BorderBrush="#2D3442" Padding="4" />
+                        </DockPanel>
+                    </StackPanel>
+                </Border>
+
+                <!-- GPT rolling usage safeguard -->
+                <TextBlock Text="GPT Image-Generation Safeguard" FontWeight="Bold" FontSize="13" Foreground="#F59E0B" Margin="0,0,0,8" />
+                <Border Background="#1A1D24" CornerRadius="6" Padding="14" Margin="0,0,0,16" BorderBrush="#2D3442" BorderThickness="1">
+                    <StackPanel>
+                        <TextBlock Text="Local rolling ceilings only; ChatGPT may impose a lower account limit. External/manual use is not visible to OpenIMG. When the provider or local ceiling is reached, the queue pauses." Foreground="#9CA3AF" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10" />
+                        <DockPanel Margin="0,0,0,8">
+                            <TextBlock Text="Maximum operations per rolling window:" Foreground="#F3F4F6" VerticalAlignment="Center" />
+                            <TextBox Text="{Binding GptMaxOperationsPerWindow, UpdateSourceTrigger=PropertyChanged}" Width="80" HorizontalAlignment="Right" Background="#161920" Foreground="#F3F4F6" BorderBrush="#2D3442" Padding="4" />
+                        </DockPanel>
+                        <DockPanel Margin="0,0,0,8">
+                            <TextBlock Text="Rolling window duration (minutes):" Foreground="#F3F4F6" VerticalAlignment="Center" />
+                            <TextBox Text="{Binding GptWindowDurationMinutes, UpdateSourceTrigger=PropertyChanged}" Width="80" HorizontalAlignment="Right" Background="#161920" Foreground="#F3F4F6" BorderBrush="#2D3442" Padding="4" />
+                        </DockPanel>
+                        <DockPanel Margin="0,0,0,8">
+                            <TextBlock Text="Safety reserve:" Foreground="#F3F4F6" VerticalAlignment="Center" />
+                            <TextBox Text="{Binding GptSafetyReserve, UpdateSourceTrigger=PropertyChanged}" Width="80" HorizontalAlignment="Right" Background="#161920" Foreground="#F3F4F6" BorderBrush="#2D3442" Padding="4" />
+                        </DockPanel>
+                        <DockPanel>
+                            <TextBlock Text="Optional rolling 24-hour maximum:" Foreground="#F3F4F6" VerticalAlignment="Center" />
+                            <TextBox Text="{Binding GptOptionalMaxOperationsPerDay, UpdateSourceTrigger=PropertyChanged, TargetNullValue=''}" Width="80" HorizontalAlignment="Right" Background="#161920" Foreground="#F3F4F6" BorderBrush="#2D3442" Padding="4" />
+                        </DockPanel>
+                    </StackPanel>
+                </Border>
+
+                <!-- Local OpenCV Thresholds -->
+                <TextBlock Text="Local OpenCV Validation Thresholds" FontWeight="Bold" FontSize="13" Foreground="#10B981" Margin="0,0,0,8" />
+                <Border Background="#1A1D24" CornerRadius="6" Padding="14" Margin="0,0,0,16" BorderBrush="#2D3442" BorderThickness="1">
+                    <StackPanel>
+                        <DockPanel Margin="0,0,0,8">
+                            <TextBlock Text="Min Structural Similarity (SSIM 0-1):" Foreground="#F3F4F6" VerticalAlignment="Center" />
+                            <TextBox Text="{Binding MinStructuralSimilarity, UpdateSourceTrigger=PropertyChanged}" Width="80" HorizontalAlignment="Right" Background="#161920" Foreground="#F3F4F6" BorderBrush="#2D3442" Padding="4" />
+                        </DockPanel>
+
+                        <DockPanel Margin="0,0,0,8">
+                            <TextBlock Text="Min Edge Consistency (0-1):" Foreground="#F3F4F6" VerticalAlignment="Center" />
+                            <TextBox Text="{Binding MinEdgeSimilarity, UpdateSourceTrigger=PropertyChanged}" Width="80" HorizontalAlignment="Right" Background="#161920" Foreground="#F3F4F6" BorderBrush="#2D3442" Padding="4" />
+                        </DockPanel>
+
+                        <DockPanel Margin="0,0,0,8">
+                            <TextBlock Text="Min Silhouette Similarity (0-1):" Foreground="#F3F4F6" VerticalAlignment="Center" />
+                            <TextBox Text="{Binding MinSilhouetteSimilarity, UpdateSourceTrigger=PropertyChanged}" Width="80" HorizontalAlignment="Right" Background="#161920" Foreground="#F3F4F6" BorderBrush="#2D3442" Padding="4" />
+                        </DockPanel>
+
+                        <DockPanel Margin="0,0,0,8">
+                            <TextBlock Text="Max Normalized Color Distribution Delta:" Foreground="#F3F4F6" VerticalAlignment="Center" />
+                            <TextBox Text="{Binding MaxAllowedNormalizedColorDistributionDifference, UpdateSourceTrigger=PropertyChanged}" Width="80" HorizontalAlignment="Right" Background="#161920" Foreground="#F3F4F6" BorderBrush="#2D3442" Padding="4" />
+                        </DockPanel>
+
+                        <DockPanel Margin="0,0,0,8">
+                            <TextBlock Text="Max Difference Map Changed Area (0-1):" Foreground="#F3F4F6" VerticalAlignment="Center" />
+                            <TextBox Text="{Binding MaxAllowedChangedAreaPercentage, UpdateSourceTrigger=PropertyChanged}" Width="80" HorizontalAlignment="Right" Background="#161920" Foreground="#F3F4F6" BorderBrush="#2D3442" Padding="4" />
+                        </DockPanel>
+
+                        <DockPanel Margin="0,0,0,8">
+                            <TextBlock Text="Max Connected Changed Block (0-1):" Foreground="#F3F4F6" VerticalAlignment="Center" />
+                            <TextBox Text="{Binding MaxAllowedLargestChangedRegionPercentage, UpdateSourceTrigger=PropertyChanged}" Width="80" HorizontalAlignment="Right" Background="#161920" Foreground="#F3F4F6" BorderBrush="#2D3442" Padding="4" />
+                        </DockPanel>
+
+                        <DockPanel Margin="0,0,0,8">
+                            <TextBlock Text="Max Protected Region Color Delta (0-1):" Foreground="#F3F4F6" VerticalAlignment="Center" />
+                            <TextBox Text="{Binding MaxAllowedProtectedAreaChangedPercentage, UpdateSourceTrigger=PropertyChanged}" Width="80" HorizontalAlignment="Right" Background="#161920" Foreground="#F3F4F6" BorderBrush="#2D3442" Padding="4" />
+                        </DockPanel>
+
+                        <DockPanel>
+                            <TextBlock Text="Min Registration Inlier Ratio (0-1):" Foreground="#F3F4F6" VerticalAlignment="Center" />
+                            <TextBox Text="{Binding MinImageRegistrationConfidence, UpdateSourceTrigger=PropertyChanged}" Width="80" HorizontalAlignment="Right" Background="#161920" Foreground="#F3F4F6" BorderBrush="#2D3442" Padding="4" />
+                        </DockPanel>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- Bottom Actions -->
+        <Border Grid.Row="2" Background="#1A1D24" CornerRadius="6" Padding="16,12" Margin="0,16,0,0" BorderBrush="#2D3442" BorderThickness="1">
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button Content="Save Settings" Style="{StaticResource AccentButton}" Command="{Binding SaveCommand}" Margin="0,0,8,0" />
+                <Button Content="Cancel" Command="{Binding CancelCommand}" />
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>

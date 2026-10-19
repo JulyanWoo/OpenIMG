@@ -1,0 +1,274 @@
+<Window x:Class="OpenIMG.App.Views.ReviewDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:OpenIMG.App.Controls"
+        xmlns:models="clr-namespace:OpenIMG.Core.Models;assembly=OpenIMG.Core"
+        Title="{Binding DecisionTitle}" Height="800" Width="1180"
+        WindowStartupLocation="CenterOwner"
+        Background="#121418" Foreground="#F3F4F6">
+    <Window.Resources>
+        <ResourceDictionary Source="/Themes/DarkTheme.xaml" />
+    </Window.Resources>
+
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <Border Grid.Row="0" Background="#1A1D24" CornerRadius="6" Padding="16,12" Margin="0,0,0,12" BorderBrush="#2D3442" BorderThickness="1">
+            <DockPanel>
+                <TextBlock Text="RESTORATION REVIEW" FontWeight="Bold" FontSize="14" Foreground="#3B82F6" VerticalAlignment="Center" />
+                <TextBlock Text="{Binding Asset.OriginalFileName, StringFormat=' - {0}'}" FontSize="14" Foreground="#9CA3AF" VerticalAlignment="Center" />
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Border Background="#1E293B" CornerRadius="4" Padding="8,4" Margin="0,0,8,0">
+                        <TextBlock Text="{Binding CalibrationId, StringFormat='Calibration: {0}'}" Foreground="#60A5FA" FontSize="11" FontWeight="Bold" />
+                    </Border>
+                    <Border Background="#374151" CornerRadius="4" Padding="8,4">
+                        <TextBlock Text="{Binding Asset.Status, StringFormat='Status: {0}'}" Foreground="#F3F4F6" FontSize="11" FontWeight="Bold" />
+                    </Border>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <!-- Main Content (Side by Side Review & Evaluation) -->
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="6*" />
+                <ColumnDefinition Width="4*" />
+            </Grid.ColumnDefinitions>
+
+            <!-- Image Comparison View (Blind: Slider, Zoom, Visual Inspection) -->
+            <Border Grid.Column="0" Margin="0,0,12,0" Background="#0F1115" CornerRadius="6" BorderBrush="#2D3442" BorderThickness="1" ClipToBounds="True">
+                <controls:ImageComparisonSlider OriginalImageSource="{Binding OriginalBitmap}"
+                                                RestoredImageSource="{Binding RestoredBitmap}" />
+            </Border>
+
+            <!-- Human Ground Truth & Diagnostic Evidence Panel -->
+            <Border Grid.Column="1" Background="#1A1D24" CornerRadius="6" BorderBrush="#2D3442" BorderThickness="1" Padding="14">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel>
+                        <!-- Product-level automated result. Human review remains independent below. -->
+                        <Border Background="#161920" BorderBrush="#374151" BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,0,0,12">
+                            <StackPanel>
+                                <DockPanel Margin="0,0,0,8">
+                                    <TextBlock Text="AUTOMATED PRODUCT REVIEW" FontWeight="Bold" FontSize="12" Foreground="#F59E0B" />
+                                    <Border HorizontalAlignment="Right" Background="#262D3D" CornerRadius="4" Padding="6,2">
+                                        <TextBlock Text="Human review remains independent" Foreground="#9CA3AF" FontSize="10" />
+                                    </Border>
+                                </DockPanel>
+                                <TextBlock Text="{Binding Barrier3Decision, StringFormat='Barrier 3: {0}'}" Foreground="#F3F4F6" FontSize="11" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding LatestAttempt.FinalDecision, StringFormat='Automated final decision: {0}'}" Foreground="#D1D5DB" FontSize="11" Margin="0,2,0,6" />
+                                <TextBlock Text="Primary reasons" Foreground="#9CA3AF" FontSize="10" Margin="0,0,0,3" />
+                                <ItemsControl ItemsSource="{Binding AutomatedDecisionReasons}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding StringFormat='• {0}'}" Foreground="#FBBF24" FontSize="11" TextWrapping="Wrap" Margin="0,1,0,1" />
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <TextBlock Text="{Binding Barrier4Routing, StringFormat='Barrier 4 routing: {0}'}" Foreground="#A78BFA" FontSize="10" Margin="0,6,0,0" />
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Product human review is independent from the automated result. -->
+                        <Border Background="#161920" BorderBrush="#10B981" BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,0,0,12">
+                            <StackPanel>
+                                <TextBlock Text="YOUR REVIEW" FontWeight="Bold" FontSize="12" Foreground="#34D399" Margin="0,0,0,6" />
+                                <TextBlock Text="Automated decision does not approve or export the image for you." Foreground="#9CA3AF" FontSize="10" TextWrapping="Wrap" Margin="0,0,0,8" />
+                                <TextBlock Text="Human status" Foreground="#D1D5DB" FontSize="11" />
+                                <TextBlock Text="{Binding HumanReviewStatus}" Foreground="#34D399" FontWeight="SemiBold" FontSize="12" Margin="0,2,0,8" />
+                                <TextBox Text="{Binding HumanNotes, UpdateSourceTrigger=PropertyChanged}"
+                                         Background="#0F1115" Foreground="#F3F4F6" BorderBrush="#2D3442"
+                                         AcceptsReturn="True" Height="54" Margin="0,0,0,8" Padding="6" FontSize="11"
+                                         ToolTip="Optional notes about this human review." />
+                                <UniformGrid Columns="3" Margin="0,0,0,8">
+                                    <Button Content="Approve" Style="{StaticResource SuccessButton}" Command="{Binding AcceptManuallyCommand}" Margin="0,0,4,0" Height="32" />
+                                    <Button Content="Reject" Style="{StaticResource DangerButton}" Command="{Binding RejectCommand}" Margin="2,0,2,0" Height="32" />
+                                    <Button Content="Uncertain" Command="{Binding MarkUncertainCommand}" Margin="4,0,0,0" Height="32" />
+                                </UniformGrid>
+                                <Button Content="Export approved image + provenance" Style="{StaticResource AccentButton}"
+                                        Command="{Binding RequestCandidateExportCommand}" IsEnabled="{Binding CanExportCandidate}" Height="30" />
+                                <TextBlock Text="{Binding HumanReviewSaveStatus}" FontSize="10" Foreground="#10B981" Margin="0,5,0,0" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Phase 3 Human Ground Truth Section (Primary Focus) -->
+                        <Border Background="#161920" BorderBrush="#3B82F6" BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,0,0,12">
+                            <Border.Style>
+                                <Style TargetType="Border">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                        <MultiDataTrigger>
+                                            <MultiDataTrigger.Conditions>
+                                                <Condition Binding="{Binding IsCalibrationFeaturesEnabled}" Value="True" />
+                                                <Condition Binding="{Binding IsCalibrationItem}" Value="True" />
+                                            </MultiDataTrigger.Conditions>
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </MultiDataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Border.Style>
+                            <StackPanel>
+                                <DockPanel Margin="0,0,0,10">
+                                    <TextBlock Text="HUMAN VISUAL JUDGMENT (GROUND TRUTH)" FontWeight="Bold" FontSize="12" Foreground="#3B82F6" VerticalAlignment="Center" />
+                                    <Border HorizontalAlignment="Right" Background="#262D3D" CornerRadius="4" Padding="6,2">
+                                        <TextBlock Text="{Binding HumanJudgment, StringFormat='Current: {0}'}" Foreground="#93C5FD" FontSize="11" FontWeight="SemiBold" />
+                                    </Border>
+                                </DockPanel>
+
+                                <!-- Primary Decision Buttons (Blind - user chooses without AI bias) -->
+                                <UniformGrid Columns="3" Margin="0,0,0,10">
+                                    <Button Content="✓ GOOD" Style="{StaticResource SuccessButton}"
+                                            Command="{Binding SetJudgmentGoodCommand}" Margin="0,0,4,0" Height="34" ToolTip="Restoration is faithful, original furniture structure is preserved." />
+                                    <Button Content="? UNCERTAIN"
+                                            Command="{Binding SetJudgmentUncertainCommand}" Margin="2,0,2,0" Height="34" Background="#854D0E" Foreground="#FEF08A" ToolTip="Ambiguous or difficult to verify visually." />
+                                    <Button Content="✗ BAD" Style="{StaticResource DangerButton}"
+                                            Command="{Binding SetJudgmentBadCommand}" Margin="4,0,0,0" Height="34" ToolTip="Furniture structure, hardware, geometry, or material altered." />
+                                </UniformGrid>
+
+                                <!-- Multi-select Defect Tags (Enabled when flawed) -->
+                                <TextBlock Text="DEFECT TAGS (Select all that apply):" FontSize="11" FontWeight="SemiBold" Foreground="#9CA3AF" Margin="0,0,0,6" />
+                                <WrapPanel Margin="0,0,0,8">
+                                    <CheckBox Content="Bad Color" IsChecked="{Binding IsBadColor}" Foreground="#E5E7EB" Margin="0,0,10,6" />
+                                    <CheckBox Content="Bad Geometry" IsChecked="{Binding IsBadGeometry}" Foreground="#E5E7EB" Margin="0,0,10,6" />
+                                    <CheckBox Content="Bad Component" IsChecked="{Binding IsBadComponent}" Foreground="#E5E7EB" Margin="0,0,10,6" />
+                                    <CheckBox Content="Bad Material" IsChecked="{Binding IsBadMaterial}" Foreground="#E5E7EB" Margin="0,0,10,6" />
+                                    <CheckBox Content="Bad Added Detail" IsChecked="{Binding IsBadAddedDetail}" Foreground="#E5E7EB" Margin="0,0,10,6" />
+                                    <CheckBox Content="Bad Removed Detail" IsChecked="{Binding IsBadRemovedDetail}" Foreground="#E5E7EB" Margin="0,0,10,6" />
+                                    <CheckBox Content="Bad Composition" IsChecked="{Binding IsBadComposition}" Foreground="#E5E7EB" Margin="0,0,10,6" />
+                                </WrapPanel>
+
+                                <!-- Human Notes -->
+                                <TextBlock Text="Human Visual Notes:" FontSize="11" Foreground="#9CA3AF" Margin="0,0,0,4" />
+                                <TextBox Text="{Binding HumanNotes, UpdateSourceTrigger=PropertyChanged}"
+                                         Background="#0F1115" Foreground="#F3F4F6" BorderBrush="#2D3442"
+                                         AcceptsReturn="True" Height="48" Margin="0,0,0,8" Padding="6" FontSize="11" />
+
+                                <Button Content="Save Ground Truth Decision"
+                                        Style="{StaticResource AccentButton}"
+                                        Command="{Binding SaveGroundTruthCommand}" Height="28" />
+
+                                <TextBlock Text="{Binding GroundTruthSaveStatus}" FontSize="10" Foreground="#10B981" Margin="0,4,0,0" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Expandable Automated Validation Evidence (Blind Review: inspect after deciding) -->
+                        <Expander Header="Automated Evidence &amp; Diagnostics (OpenCV)" IsExpanded="False"
+                                  Background="#161920" Foreground="#9CA3AF" BorderBrush="#2D3442" BorderThickness="1" Padding="8" Margin="0,0,0,12">
+                            <StackPanel Margin="0,8,0,0">
+                                <!-- Local OpenCV Validation Report -->
+                                <TextBlock Text="BARRIER 3: LOCAL OPENCV VALIDATION" FontWeight="Bold" FontSize="11" Foreground="#10B981" Margin="0,0,0,6" />
+                                <Border Background="#0F1115" CornerRadius="4" Padding="8" Margin="0,0,0,8">
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding Barrier3Decision, StringFormat='Barrier 3 Local Decision: {0}'}"
+                                                   Foreground="#F3F4F6" FontSize="11" FontWeight="Bold" Margin="0,0,0,2" />
+                                         <TextBlock Text="{Binding LatestAttempt.FinalDecision, StringFormat='Automated product decision: {0}'}"
+                                                   Foreground="#9CA3AF" FontSize="11" Margin="0,0,0,6" />
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Grid.Column="0">
+                                            <TextBlock Text="{Binding LocalReport.StructuralSimilarity, StringFormat='SSIM: {0:F3}'}" Foreground="#F3F4F6" FontSize="11" />
+                                            <TextBlock Text="{Binding LocalReport.SilhouetteSimilarity, StringFormat='Silhouette: {0:P1}'}" Foreground="#9CA3AF" FontSize="11" />
+                                            <TextBlock Text="{Binding LocalReport.EdgePrecision, StringFormat='Edge Precision: {0:F4}'}" Foreground="#9CA3AF" FontSize="11" />
+                                            <TextBlock Text="{Binding LocalReport.EdgeRecall, StringFormat='Edge Recall: {0:F4}'}" Foreground="#9CA3AF" FontSize="11" />
+                                            <TextBlock Text="{Binding LocalReport.EdgeF1, StringFormat='Edge F1: {0:F4}'}" Foreground="#9CA3AF" FontSize="11" />
+                                            <TextBlock Text="{Binding LocalReport.CoarseEdgeF1, StringFormat='Coarse F1: {0:F4}'}" Foreground="#9CA3AF" FontSize="11" />
+                                            <TextBlock Text="{Binding LocalReport.MediumEdgeF1, StringFormat='Medium F1: {0:F4}'}" Foreground="#9CA3AF" FontSize="11" />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1">
+                                            <TextBlock Text="{Binding LocalReport.MeanEdgeDistance, StringFormat='Mean Dist: {0:F2} px'}" Foreground="#F3F4F6" FontSize="11" />
+                                            <TextBlock Text="{Binding LocalReport.UnexpectedEdgeRatio, StringFormat='Unexp. Ratio: {0:P1}'}" Foreground="#9CA3AF" FontSize="11" />
+                                            <TextBlock Text="{Binding LocalReport.MediumUnexpectedEdgeRatio, StringFormat='Med. Unexp: {0:P1}'}" Foreground="#9CA3AF" FontSize="11" />
+                                            <TextBlock Text="{Binding LocalReport.LargestUnexpectedEdgeClusterRatio, StringFormat='Max Cluster: {0:P1}'}" Foreground="#9CA3AF" FontSize="11" />
+                                            <TextBlock Text="{Binding LocalReport.ProtectedAreaChangedPercentage, StringFormat='Prot. Changed: {0:P1}'}" Foreground="#9CA3AF" FontSize="11" />
+                                            <TextBlock Text="{Binding LocalReport.NormalizedColorDistributionDifference, StringFormat='Norm. Color: {0:F4}'}" Foreground="#9CA3AF" FontSize="11" />
+                                            <TextBlock Text="{Binding LocalReport.RegistrationModel, StringFormat='Model: {0}'}" Foreground="#9CA3AF" FontSize="11" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- Analysis Summary -->
+                                <TextBlock Text="BARRIER 1: FURNITURE ANALYSIS" FontWeight="Bold" FontSize="11" Foreground="#3B82F6" Margin="0,0,0,6" />
+                                <Border Background="#0F1115" CornerRadius="4" Padding="8" Margin="0,0,0,8">
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding Analysis.FurnitureType, StringFormat='Type: {0}'}" Foreground="#F3F4F6" FontSize="11" FontWeight="SemiBold" />
+                                        <TextBlock Text="{Binding Analysis.GeometryDescription, StringFormat='Layout: {0}'}" Foreground="#9CA3AF" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,0" />
+                                    </StackPanel>
+                                </Border>
+
+                                <TextBlock Text="CONTRACT &amp; PROTECTED REGION QUALITY" FontWeight="Bold" FontSize="11" Foreground="#60A5FA" Margin="0,0,0,6" />
+                                <Border Background="#0F1115" CornerRadius="4" Padding="8" Margin="0,0,0,8">
+                                    <StackPanel>
+                                        <TextBlock Text="Barrier 1 analysis quality" Foreground="#9CA3AF" FontSize="10" Margin="0,0,0,3" />
+                                        <ComboBox SelectedValue="{Binding AnalysisQuality, Mode=TwoWay}"
+                                                  SelectedValuePath="Tag" Margin="0,0,0,8">
+                                            <ComboBoxItem Content="Correct" Tag="{x:Static models:AnalysisGroundTruthQuality.Correct}" />
+                                            <ComboBoxItem Content="Mostly correct" Tag="{x:Static models:AnalysisGroundTruthQuality.MostlyCorrect}" />
+                                            <ComboBoxItem Content="Incorrect" Tag="{x:Static models:AnalysisGroundTruthQuality.Incorrect}" />
+                                            <ComboBoxItem Content="Uncertain" Tag="{x:Static models:AnalysisGroundTruthQuality.Uncertain}" />
+                                        </ComboBox>
+
+                                        <TextBlock Text="Protected region quality" Foreground="#9CA3AF" FontSize="10" Margin="0,0,0,3" />
+                                        <ComboBox SelectedValue="{Binding RegionQuality, Mode=TwoWay}"
+                                                  SelectedValuePath="Tag" Margin="0,0,0,8">
+                                            <ComboBoxItem Content="Good" Tag="{x:Static models:ProtectedRegionQuality.Good}" />
+                                            <ComboBoxItem Content="Approximate" Tag="{x:Static models:ProtectedRegionQuality.Approximate}" />
+                                            <ComboBoxItem Content="Poor" Tag="{x:Static models:ProtectedRegionQuality.Poor}" />
+                                            <ComboBoxItem Content="Missing" Tag="{x:Static models:ProtectedRegionQuality.Missing}" />
+                                        </ComboBox>
+
+                                        <Button Content="Save contract quality"
+                                                Style="{StaticResource AccentButton}"
+                                                Command="{Binding SaveGroundTruthCommand}" Height="28" />
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- Evidences List -->
+                                <TextBlock Text="EVALUATION EVIDENCES" FontWeight="Bold" FontSize="11" Foreground="#F59E0B" Margin="0,0,0,6" />
+                                <ItemsControl ItemsSource="{Binding LocalReport.Evidences}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Background="#0F1115" CornerRadius="4" Padding="6,4" Margin="0,0,0,4">
+                                                <DockPanel>
+                                                    <TextBlock Text="{Binding Severity}" FontWeight="Bold" FontSize="10" Foreground="#F59E0B" Width="65" VerticalAlignment="Center" />
+                                                    <TextBlock Text="{Binding Message}" FontSize="11" Foreground="#9CA3AF" TextWrapping="Wrap" VerticalAlignment="Center" />
+                                                </DockPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </Expander>
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
+        </Grid>
+
+        <!-- Bottom Action Bar -->
+        <Border Grid.Row="2" Background="#1A1D24" CornerRadius="6" Padding="16,12" Margin="0,12,0,0" BorderBrush="#2D3442" BorderThickness="1">
+            <DockPanel>
+                <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
+                    <StackPanel.Style>
+                        <Style TargetType="StackPanel">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsCalibrationItem}" Value="True">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </StackPanel.Style>
+                    <Button Content="Retry Restoration"
+                            Command="{Binding RetryCommand}" Margin="0,0,8,0" />
+                </StackPanel>
+                <Button Content="Close" HorizontalAlignment="Right" Command="{Binding CloseCommand}" />
+            </DockPanel>
+        </Border>
+    </Grid>
+</Window>
