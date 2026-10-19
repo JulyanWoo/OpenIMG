@@ -1,0 +1,7 @@
+<Project>
+  <PropertyGroup>
+    <OpenIMGEngineeringBuild Condition="'$(OpenIMGEngineeringBuild)' == ''">false</OpenIMGEngineeringBuild>
+    <DefineConstants Condition="'$(OpenIMGEngineeringBuild)' == 'true'">$(DefineConstants);OPENIMG_ENGINEERING</DefineConstants>
+  </PropertyGroup>
+
+</Project>

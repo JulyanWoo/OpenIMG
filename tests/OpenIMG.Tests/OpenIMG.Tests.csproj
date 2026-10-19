@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <UseWPF>true</UseWPF>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.4" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.24.4" />
+    <PackageReference Include="OpenCvSharp4.runtime.win" Version="4.13.0.20260627" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\OpenIMG.Core\OpenIMG.Core.csproj" />
+    <ProjectReference Include="..\..\src\OpenIMG.Application\OpenIMG.Application.csproj" />
+    <ProjectReference Include="..\..\src\OpenIMG.Infrastructure\OpenIMG.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\OpenIMG.App\OpenIMG.App.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\calibration\phase3\calibration_manifest.json"
+          Link="calibration\phase3\calibration_manifest.json"
+          CopyToOutputDirectory="PreserveNewest"
+          Condition="'$(OpenIMGEngineeringBuild)' == 'true' and Exists('..\..\calibration\phase3\calibration_manifest.json')" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(OpenIMGEngineeringBuild)' != 'true'">
+    <Compile Remove="DatabaseInspectionTests.cs;GeminiValidationParserTests.cs;GptCorrectiveProviderTests.cs;GptDirectRestorationPilotTests.cs;LiveAttemptsCalibrationEvaluationTests.cs;Phase36ValidationTests.cs;Phase3CalibrationTests.cs;Phase4AShadowModeEvaluationTests.cs;Phase4BPolicyCalibrationTests.cs;Phase4C1CompactionTests.cs;Phase4C1HighQualityConservativeTests.cs;Phase4C3HardwareAndColorTests.cs;Phase4C3RevalidationTests.cs;Phase4C4CalibrationTests.cs;Phase4C4RevalidationRunnerTests.cs;Phase4CLocalFirstActivationTests.cs;Phase4D1LiveVerificationTests.cs;Phase4DHistoricalEvaluationTests.cs;Phase4E2StrongPhotographicRestorationTests.cs;Phase4E3CalibrationTests.cs;Phase4EPilotTests.cs;Phase4F1ContractAuthorityTests.cs;Phase4F1PreflightTests.cs;Phase4F3NegativeSpaceTests.cs;Phase4F3PreflightTests.cs;Phase4F4CalibrationTests.cs" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,48 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\OpenIMG.Core\OpenIMG.Core.csproj" />
+    <ProjectReference Include="..\OpenIMG.Application\OpenIMG.Application.csproj" />
+    <ProjectReference Include="..\OpenIMG.Infrastructure\OpenIMG.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="Exists('..\..\models')">
+    <Content Include="..\..\models\**\*">
+      <Link>models\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(OpenIMGEngineeringBuild)' != 'true'">
+    <Compile Remove="Composition\AppCommandDispatcher.cs" />
+    <Compile Remove="GptSpikeWindow.xaml.cs" />
+    <Page Remove="GptSpikeWindow.xaml" />
+    <Compile Remove="Browser\GeminiDomAdapter.cs;Browser\GeminiWebClient.cs;Browser\GeminiWebProvider.cs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="Exists('Assets\OpenIMG.ico')">
+    <Resource Include="Assets\OpenIMG.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4191.47" />
+    <PackageReference Include="System.Management" Version="10.0.12" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Version>0.1.0</Version>
+    <InformationalVersion>0.1.0-rc.3</InformationalVersion>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <ApplicationIcon Condition="Exists('Assets\OpenIMG.ico')">Assets\OpenIMG.ico</ApplicationIcon>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+  </PropertyGroup>
+
+</Project>

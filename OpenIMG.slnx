@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/OpenIMG.App/OpenIMG.App.csproj" />
+    <Project Path="src/OpenIMG.Application/OpenIMG.Application.csproj" />
+    <Project Path="src/OpenIMG.Core/OpenIMG.Core.csproj" />
+    <Project Path="src/OpenIMG.Infrastructure/OpenIMG.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/OpenIMG.Tests/OpenIMG.Tests.csproj" />
+  </Folder>
+</Solution>
