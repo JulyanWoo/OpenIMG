@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RunSettings>
+  <RunConfiguration>
+    <!-- Three minutes is above the current full deterministic suite duration
+         while still preventing an unattended hang. -->
+    <TestSessionTimeout>180000</TestSessionTimeout>
+  </RunConfiguration>
+</RunSettings>
