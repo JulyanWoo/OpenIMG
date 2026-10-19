@@ -1,0 +1,126 @@
+## Build results
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+[Pp]ublish/
+[Ll]og/
+[Ll]ogs/
+
+## Visual Studio
+.vs/
+*.user
+*.userosscache
+*.sln.docstates
+*.suo
+*.userprefs
+
+## JetBrains / Rider
+.idea/
+*.DotSettings.user
+_ReSharper*/
+
+## Visual Studio Code
+.vscode/
+*.code-workspace
+
+## Test Results & Diagnostics
+[Tt]est[Rr]esult*/
+TestResults/
+**/TestResults/
+*.trx
+*.coverage
+*.coveragexml
+coverage/
+**/coverage/
+temp_diag/
+calibration/temp_diag/
+
+## User-specified exclusions
+ERROR/
+ERROR
+calibration/
+!/src/OpenIMG.Application/Calibration/
+!/src/OpenIMG.Application/Calibration/**
+
+## Build, packaging, and local engineering artifacts
+/artifacts/
+/scratch/
+/installer/
+/models/
+/src/OpenIMG.App/Assets/
+/TestResults/
+/coverage/
+/PUBLIC_SNAPSHOT_ALLOWLIST.txt
+/PUBLIC_SNAPSHOT_DENYLIST.txt
+/PUBLIC_SNAPSHOT_FILE_CLASSIFICATION.csv
+/PUBLIC_SNAPSHOT_PREPARATION_REPORT.md
+/PUBLIC_SNAPSHOT_PROPOSED_TREE.md
+/PUBLIC_SNAPSHOT_REMEDIATION_REPORT.md
+/PUBLIC_TECHNICAL_DEBT.md
+/NEW_PUBLIC_REPOSITORY_PLAN.md
+/SECURITY_PRE_GIT_AUDIT.md
+/REPOSITORY_HYGIENE.md
+/rules/
+
+## Runtime state and private user data
+**/settings.json
+*.db
+*.db-*
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.sqlite-*
+*.log
+*.log.*
+*.tmp
+*.temp
+*.bak
+/cache/
+/temp/
+/tmp/
+/logs/
+/output/
+/outputs/
+/downloads/
+/screenshots/
+/diagnostics/
+/operations/
+/crashdumps/
+*.dmp
+*.stackdump
+
+## Authenticated browser profiles and provider session state
+**/WebView2Profile*/
+**/WebView2UserData*/
+**/WebView2UserData/
+**/webview2-user-data/
+**/browser-profile/
+**/BrowserProfile/
+**/User Data/
+**/GPUCache/
+**/Code Cache/
+**/Service Worker/CacheStorage/
+
+## OS files
+Thumbs.db
+ehthumbs.db
+[Dd]esktop.ini
+$RECYCLE.BIN/
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+
+## Environment & Local Config
+.env
+.env.*
+*.local
+appsettings*.local.json
+.secrets/
+secrets/
+*.pem
+*.p12
+*.pfx
+*.key
