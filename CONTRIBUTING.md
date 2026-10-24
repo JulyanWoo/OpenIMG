@@ -16,6 +16,8 @@ Run the deterministic suite from the repository root:
 
 It runs only the public `Unit` and `Integration` test categories. `dotnet test OpenIMG.slnx` is also safe by default: calibration-only tests are not compiled into the default test project. Live GPT operations are not part of default verification. The live-GPT runner currently exits without doing work if no explicitly categorized live test exists.
 
+For changes to submission, generation waiting, conversation binding or native downloads, also run `./scripts/test-gpt-generation.ps1`. Its six WebView2 cases use local intercepted pages, synthetic images and isolated profiles; they do not use an authenticated account. See [GPT automation](docs/GPT_AUTOMATION.md).
+
 ## Data and privacy boundaries
 
 - Use synthetic or explicitly redistributable test fixtures; never add personal/customer photographs to a change.
