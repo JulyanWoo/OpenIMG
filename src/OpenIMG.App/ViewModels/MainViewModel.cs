@@ -1,5 +1,4 @@
 using System.Collections.ObjectModel;
-using System.Reflection;
 using System.IO;
 using System.Windows;
 using System.Windows.Threading;
@@ -15,6 +14,8 @@ using OpenIMG.Application.Abstractions.Persistence;
 using OpenIMG.Application.Abstractions.Storage;
 using OpenIMG.Application.Configuration;
 using OpenIMG.Application.Importing;
+using OpenIMG.Application.Restoration;
+using OpenIMG.Infrastructure.Storage;
 using OpenIMG.Core.Entities;
 using OpenIMG.Core.Enums;
 using OpenIMG.Core.Models;
@@ -23,9 +24,7 @@ namespace OpenIMG.App.ViewModels;
 
 public partial class MainViewModel : ObservableObject, IDisposable
 {
-    public string ReleaseVersion { get; } =
-        typeof(MainViewModel).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
-        ?? "0.1.0-rc.3";
+    public string ReleaseVersion => OpenImgBuildIdentity.DisplayedVersion;
 
     private readonly IProjectRepository _projectRepository;
     private readonly IImageAssetRepository _assetRepository;
@@ -117,7 +116,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         ProjectSourceFolderMonitor sourceFolderMonitor,
         ProjectSourceImageImporter sourceImageImporter,
         OpenImgOptions options,
-        ILogger<MainViewModel> logger)
+        ILogger<MainViewModel> logger,
+        ImageRetryService retryService,
+        ResultCopyService resultCopies)
     {
         _projectRepository = projectRepository;
         _assetRepository = assetRepository;
@@ -128,6 +129,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _sourceImageImporter = sourceImageImporter;
         _options = options;
         _logger = logger;
+        _retryService = retryService;
+        _resultCopies = resultCopies;
 
         _queue.StateChanged += OnQueueStateChanged;
         _queue.AssetProgress += OnAssetProgress;
@@ -158,6 +161,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         _ = MonitorGptStatusAsync(_lifetimeCts.Token);
+        _ = RestoreAutomaticCopiesAsync();
     }
 
     private async Task MonitorGptStatusAsync(CancellationToken cancellationToken)
@@ -437,25 +441,31 @@ public partial class MainViewModel : ObservableObject, IDisposable
                                                 a.Status == ImageProcessingStatus.LocalValidation ||
                                                 a.Status == ImageProcessingStatus.RemoteValidation),
             "Accepted" => AllAssets.Where(a => a.Status == ImageProcessingStatus.Accepted),
-            "Review" => AllAssets.Where(a => a.Status == ImageProcessingStatus.NeedsReview),
+            "Review" => AllAssets.Where(a => a.Status == ImageProcessingStatus.NeedsReview && a.WorkState.HasCurrentResult),
             "Failed" => AllAssets.Where(a => a.Status == ImageProcessingStatus.Failed),
+            "Missing" => AllAssets.Where(a => a.WorkState.MissingResult),
+            "Recoverable" => AllAssets.Where(a => a.WorkState.Recoverable),
+            "Manual" => AllAssets.Where(a => a.WorkState.ManualRecoveryRequired),
+            "Saved" => AllAssets.Where(a => a.RestoredImagePath is not null),
             _ => AllAssets
         };
+
+        if (!string.IsNullOrWhiteSpace(SearchText))
+            query = query.Where(item => item.FileName.Contains(SearchText.Trim(), StringComparison.OrdinalIgnoreCase));
 
         foreach (var item in query)
         {
             FilteredAssets.Add(item);
         }
 
-        if (SelectedAsset == null && FilteredAssets.Count > 0)
-        {
-            SelectedAsset = FilteredAssets[0];
-        }
+        if (SelectedAsset == null || !FilteredAssets.Contains(SelectedAsset))
+            SelectedAsset = FilteredAssets.FirstOrDefault();
     }
 
     partial void OnSelectedAssetChanged(AssetItemViewModel? value)
     {
         LoadSelectedAssetImages(value);
+        NotifyAutomationControls();
     }
 
     private void LoadSelectedAssetImages(AssetItemViewModel? vm)
@@ -535,6 +545,19 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 if (SelectedAsset?.Id == assetId)
                     LoadSelectedAssetImages(assetViewModel);
             });
+            if (_options.AutomaticResultCopyEnabled && ImageWorkState.Read(persistedAsset).HasCurrentResult)
+            {
+                try
+                {
+                    await Task.Run(() => _resultCopies.SaveAsync(persistedAsset, _options.AutomaticResultCopyDirectory, _lifetimeCts.Token));
+                    await InvokeOnUiThreadAsync(() => QuickActionMessage = "Copia automática guardada; revisión humana pendiente de tu decisión.");
+                }
+                catch (Exception error) when (error is not OperationCanceledException)
+                {
+                    _logger.LogWarning(error, "Automatic review copy failed for asset {AssetId}", assetId);
+                    await InvokeOnUiThreadAsync(() => QuickActionMessage = "No se pudo guardar la copia automática. El resultado de OpenIMG se conserva; revisa la carpeta de copias.");
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -551,36 +574,79 @@ public partial class MainViewModel : ObservableObject, IDisposable
                                                a.Status == ImageProcessingStatus.LocalValidation ||
                                                a.Status == ImageProcessingStatus.RemoteValidation);
         AcceptedCount = AllAssets.Count(a => a.Status == ImageProcessingStatus.Accepted);
-        ReviewCount = AllAssets.Count(a => a.Status == ImageProcessingStatus.NeedsReview);
+        ReviewCount = AllAssets.Count(a => a.Status == ImageProcessingStatus.NeedsReview && a.WorkState.HasCurrentResult);
         FailedCount = AllAssets.Count(a => a.Status == ImageProcessingStatus.Failed);
+        UpdateQuickCounts();
+        ApplyFilter(SelectedFilter);
     }
 
     [RelayCommand]
     public async Task StartQueueAsync()
     {
-        if (CurrentProject == null) return;
-        IsQueueRunning = true;
-        IsQueuePaused = false;
-        await _queue.StartAsync(CurrentProject.Id);
+        if (CurrentProject == null || !CanUseQuickActions) return;
+        if (!IsGptReady)
+        {
+            IsBrowserVisible = true;
+            QueueStatusText = "Inicia sesión en GPT Web. La cola esperará hasta que la sesión esté lista.";
+            return;
+        }
+        try
+        {
+            if (_queue.IsRunning)
+            {
+                if (_queue.IsPaused) await _queue.ResumeAsync();
+            }
+            else
+            {
+                await _queue.StartAsync(CurrentProject.Id);
+            }
+        }
+        catch (Exception error)
+        {
+            _logger.LogWarning("Could not start or resume processing queue. Error type: {ErrorType}", error.GetType().Name);
+            QueueStatusText = "No se pudo iniciar la cola. Revisa el estado de GPT Web e inténtalo de nuevo.";
+        }
+        finally
+        {
+            SyncQueueUiState();
+        }
     }
 
     [RelayCommand]
     public async Task StopQueueAsync()
     {
-        await _queue.StopAsync();
-        IsQueueRunning = false;
+        try { await _queue.StopAsync(); }
+        finally { SyncQueueUiState(); }
     }
 
     [RelayCommand]
     public async Task PauseQueueAsync()
     {
-        await _queue.PauseAsync();
+        try { await _queue.PauseAsync(); }
+        finally { SyncQueueUiState(); }
     }
 
     [RelayCommand]
     public async Task ResumeQueueAsync()
     {
-        await _queue.ResumeAsync();
+        if (CurrentProject is null || !IsGptReady || !CanUseQuickActions) return;
+        try
+        {
+            if (_queue.IsRunning)
+            {
+                if (_queue.IsPaused) await _queue.ResumeAsync();
+            }
+            else
+            {
+                await _queue.StartAsync(CurrentProject.Id);
+            }
+        }
+        catch (Exception error)
+        {
+            _logger.LogWarning("Could not resume processing queue. Error type: {ErrorType}", error.GetType().Name);
+            QueueStatusText = "La cola sigue detenida. Revisa GPT Web e inténtalo de nuevo.";
+        }
+        finally { SyncQueueUiState(); }
     }
 
     [RelayCommand]
@@ -592,16 +658,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand]
     public async Task RetrySelectedAsync()
     {
-        if (SelectedAsset == null) return;
-        await _queue.RetryAssetAsync(SelectedAsset.Id);
-        SelectedAsset.Status = ImageProcessingStatus.Pending;
-        SelectedAsset.RefreshState();
-        UpdateCounts();
+        if (!CanRetrySelected || SelectedAsset == null) return;
+        try { await RetryAssetsAsync([SelectedAsset.Id], false); }
+        catch (Exception error)
+        {
+            _logger.LogWarning(error, "Could not requeue the selected asset");
+            QuickActionMessage = "No se pudo preparar el reintento; el historial se conserva. Actualiza los estados y revisa la foto.";
+        }
     }
 
     public async Task ResetAllProcessingStatesAsync()
     {
-        if (IsResettingProcessingStates)
+        if (IsResettingProcessingStates || IsQuickActionRunning)
             return;
 
         var project = CurrentProject;
@@ -649,10 +717,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
         System.Windows.Application.Current.Dispatcher.Invoke(() =>
         {
             QueueStatusText = $"{e.FileName}: {e.Step}";
+            NotifyAutomationControls();
         });
 
         if (e.IsTerminal)
             _ = RefreshAssetFromPersistenceAsync(e.AssetId);
+    }
+
+    private void SyncQueueUiState()
+    {
+        IsQueueRunning = _queue.IsRunning;
+        IsQueuePaused = _queue.IsPaused;
+        NotifyAutomationControls();
     }
 
     public void Dispose()

@@ -47,7 +47,9 @@ public sealed class SourceFolderImportTests
             monitor,
             importer,
             new OpenImgOptions { DefaultOutputDirectory = outputFolder },
-            NullLogger<MainViewModel>.Instance)
+            NullLogger<MainViewModel>.Instance,
+            new OpenIMG.Application.Restoration.ImageRetryService(assetRepository),
+            new ResultCopyService(new FileSystemService()))
         {
             CurrentProject = project
         };

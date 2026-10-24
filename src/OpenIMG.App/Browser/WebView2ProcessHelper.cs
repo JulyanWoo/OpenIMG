@@ -173,41 +173,25 @@ public static partial class WebView2ProcessHelper
         catch { }
     }
 
-    public static void EnsureSingleInstance()
+    private static Mutex? _instanceMutex;
+
+    // Scope the lock to runtime data, not executable path: clean-room builds may coexist.
+    // Never terminate another application instance to acquire its data/profile.
+    public static bool EnsureSingleInstance(string runtimeRoot)
     {
-        try
-        {
-            var currentPid = Environment.ProcessId;
-            var currentProcess = Process.GetCurrentProcess();
-            string? currentExe = null;
-            try { currentExe = currentProcess.MainModule?.FileName; } catch { }
+        var canonical = Path.GetFullPath(runtimeRoot).TrimEnd('\\', '/').ToUpperInvariant();
+        var fingerprint = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(canonical)));
+        _instanceMutex = new Mutex(false, @"Local\OpenIMG-" + fingerprint);
+        try { return _instanceMutex.WaitOne(0); }
+        catch (AbandonedMutexException) { return true; }
+    }
 
-            if (string.IsNullOrEmpty(currentExe)) return;
-
-            foreach (var proc in Process.GetProcessesByName(currentProcess.ProcessName))
-            {
-                if (proc.Id != currentPid)
-                {
-                    try
-                    {
-                        var exe = proc.MainModule?.FileName;
-                        if (string.Equals(exe, currentExe, StringComparison.OrdinalIgnoreCase))
-                        {
-                            Log.Information("Terminating duplicate lingering OpenIMG process with PID {Pid}", proc.Id);
-                            proc.Kill(entireProcessTree: true);
-                            proc.WaitForExit(2000);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Log.Warning(ex, "Could not terminate duplicate process {Pid}", proc.Id);
-                    }
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            Log.Warning(ex, "Error in EnsureSingleInstance");
-        }
+    public static void ReleaseSingleInstance()
+    {
+        if (_instanceMutex is null) return;
+        try { _instanceMutex.ReleaseMutex(); }
+        catch (ApplicationException) { }
+        _instanceMutex.Dispose();
+        _instanceMutex = null;
     }
 }

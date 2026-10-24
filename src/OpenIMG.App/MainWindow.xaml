@@ -15,7 +15,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="58" />
             <RowDefinition Height="*" />
-            <RowDefinition Height="72" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <Border Grid.Row="0" Background="#121720" BorderBrush="#28313F" BorderThickness="0,0,0,1" Padding="18,0">
@@ -24,9 +24,9 @@
                     <StackPanel VerticalAlignment="Center">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="OpenIMG" FontWeight="Bold" FontSize="15" Foreground="White" />
-                            <TextBlock Text="{Binding ReleaseVersion, StringFormat='v{0}'}" FontSize="10" Foreground="#8F9BAD" VerticalAlignment="Center" Margin="7,1,0,0" />
+                            <TextBlock Text="{Binding ReleaseVersion, StringFormat='v{0}'}" FontSize="11" Foreground="#8F9BAD" VerticalAlignment="Center" Margin="7,1,0,0" />
                         </StackPanel>
-                        <TextBlock Text="Restauración fotográfica conservadora" FontSize="10" Foreground="#8F9BAD" Margin="0,2,0,0" />
+                        <TextBlock Text="Restauración fotográfica conservadora" FontSize="11" Foreground="#8F9BAD" Margin="0,2,0,0" />
                     </StackPanel>
                     <Border Background="#2B3442" Width="1" Height="24" Margin="18,0" />
                     <TextBlock Text="{Binding CurrentProject.Name, TargetNullValue='Biblioteca local'}"
@@ -49,7 +49,7 @@
                                     </Style>
                                 </Ellipse.Style>
                             </Ellipse>
-                            <TextBlock Text="{Binding GptStatusText}" FontSize="10" Foreground="#D6DCE6" VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding GptStatusText}" FontSize="11" Foreground="#D6DCE6" VerticalAlignment="Center" />
                         </StackPanel>
                     </Border>
                     <Button Content="GPT Web" Command="{Binding ToggleBrowserCommand}" Margin="0,0,8,0" Padding="12,7" />
@@ -76,31 +76,42 @@
 
                     <Border Grid.Row="0" Padding="16,16,16,13" BorderBrush="#252E3A" BorderThickness="0,0,0,1">
                         <StackPanel>
-                            <TextBlock Text="BIBLIOTECA" FontSize="10" FontWeight="Bold" Foreground="#7F8CA0" Margin="1,0,0,10" />
+                            <TextBlock Text="BIBLIOTECA" FontSize="11" FontWeight="Bold" Foreground="#7F8CA0" Margin="1,0,0,10" />
                             <Button Content="＋   Importar fotos" Style="{StaticResource AccentButton}"
                                     Command="{Binding ImportFolderCommand}" HorizontalAlignment="Stretch" Height="40" />
                             <TextBlock Text="{Binding CurrentProject.SourceDirectory, TargetNullValue='Selecciona una carpeta para importar'}"
-                                       Foreground="#8793A5" FontSize="10" TextTrimming="CharacterEllipsis"
+                                       Foreground="#8793A5" FontSize="11" TextTrimming="CharacterEllipsis"
                                        ToolTip="{Binding CurrentProject.SourceDirectory}" Margin="2,9,2,0" />
                         </StackPanel>
                     </Border>
 
                     <Border Grid.Row="1" Padding="12,10" BorderBrush="#252E3A" BorderThickness="0,0,0,1">
                         <StackPanel>
-                            <TextBlock Text="VISTAS" FontSize="10" FontWeight="Bold" Foreground="#7F8CA0" Margin="2,0,0,7" />
+                            <TextBlock Text="VISTAS" FontSize="11" FontWeight="Bold" Foreground="#7F8CA0" Margin="2,0,0,7" />
+                            <TextBlock Text="Buscar por nombre" FontSize="11" Foreground="#A6B0BF" Margin="2,0,0,4" />
+                            <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged, Delay=250}"
+                                     Padding="7,5" Margin="0,0,0,7" ToolTip="Combina la búsqueda con cualquier filtro." />
                             <WrapPanel>
-                                <Button Content="{Binding TotalCount, StringFormat='Todas  {0}'}" Command="{Binding SetFilterCommand}"
-                                        CommandParameter="All" Margin="0,2,5,2" Padding="9,5" FontSize="10" />
-                                <Button Content="{Binding PendingCount, StringFormat='Pendientes  {0}'}" Command="{Binding SetFilterCommand}"
-                                        CommandParameter="Pending" Margin="0,2,5,2" Padding="9,5" FontSize="10" />
-                                <Button Content="{Binding ProcessingCount, StringFormat='En curso  {0}'}" Command="{Binding SetFilterCommand}"
-                                        CommandParameter="Processing" Margin="0,2,5,2" Padding="9,5" FontSize="10" />
-                                <Button Content="{Binding ReviewCount, StringFormat='Revisión  {0}'}" Command="{Binding SetFilterCommand}"
-                                        CommandParameter="Review" Margin="0,2,5,2" Padding="9,5" FontSize="10" />
-                                <Button Content="{Binding AcceptedCount, StringFormat='Aceptadas  {0}'}" Command="{Binding SetFilterCommand}"
-                                        CommandParameter="Accepted" Margin="0,2,5,2" Padding="9,5" FontSize="10" />
-                                <Button Content="{Binding FailedCount, StringFormat='Fallidas  {0}'}" Command="{Binding SetFilterCommand}"
-                                        CommandParameter="Failed" Margin="0,2,5,2" Padding="9,5" FontSize="10" />
+                                <Button Content="{Binding TotalCount}" ContentStringFormat="Todas  {0}" Command="{Binding SetFilterCommand}"
+                                        CommandParameter="All" Margin="0,2,5,2" Padding="9,5" FontSize="11" />
+                                <Button Content="{Binding PendingCount}" ContentStringFormat="Pendientes  {0}" Command="{Binding SetFilterCommand}"
+                                        CommandParameter="Pending" Margin="0,2,5,2" Padding="9,5" FontSize="11" />
+                                <Button Content="{Binding ProcessingCount}" ContentStringFormat="En curso  {0}" Command="{Binding SetFilterCommand}"
+                                        CommandParameter="Processing" Margin="0,2,5,2" Padding="9,5" FontSize="11" />
+                                <Button Content="{Binding ReviewCount}" ContentStringFormat="Revisión  {0}" Command="{Binding SetFilterCommand}"
+                                        CommandParameter="Review" Margin="0,2,5,2" Padding="9,5" FontSize="11" />
+                                <Button Content="{Binding AcceptedCount}" ContentStringFormat="Aceptadas  {0}" Command="{Binding SetFilterCommand}"
+                                        CommandParameter="Accepted" Margin="0,2,5,2" Padding="9,5" FontSize="11" />
+                                <Button Content="{Binding FailedCount}" ContentStringFormat="Fallidas  {0}" Command="{Binding SetFilterCommand}"
+                                        CommandParameter="Failed" Margin="0,2,5,2" Padding="9,5" FontSize="11" />
+                                <Button Content="{Binding MissingResultCount}" ContentStringFormat="Sin resultado  {0}" Command="{Binding SetFilterCommand}"
+                                        CommandParameter="Missing" Margin="0,2,5,2" Padding="9,5" FontSize="11" ToolTip="El último intento terminó sin un archivo de resultado disponible." />
+                                <Button Content="{Binding RecoverableCount}" ContentStringFormat="Recuperables  {0}" Command="{Binding SetFilterCommand}"
+                                        CommandParameter="Recoverable" Margin="0,2,5,2" Padding="9,5" FontSize="11" />
+                                <Button Content="{Binding ManualRecoveryCount}" ContentStringFormat="Sin enlace  {0}" Command="{Binding SetFilterCommand}"
+                                        CommandParameter="Manual" Margin="0,2,5,2" Padding="9,5" FontSize="11" />
+                                <Button Content="{Binding SavedResultCount}" ContentStringFormat="Con resultado  {0}" Command="{Binding SetFilterCommand}"
+                                        CommandParameter="Saved" Margin="0,2,5,2" Padding="9,5" FontSize="11" />
                             </WrapPanel>
                         </StackPanel>
                     </Border>
@@ -111,8 +122,8 @@
                             <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
                         <DockPanel Grid.Row="0" Margin="15,13,13,7">
-                            <TextBlock Text="FOTOS" FontSize="10" FontWeight="Bold" Foreground="#7F8CA0" />
-                            <TextBlock Text="{Binding FilteredAssets.Count, StringFormat=' {0}'}" FontSize="10" Foreground="#64748B" />
+                            <TextBlock Text="{Binding SelectedFilterLabel}" FontSize="11" FontWeight="Bold" Foreground="#7F8CA0" />
+                            <TextBlock Text="{Binding FilteredAssets.Count, StringFormat=' {0}'}" FontSize="11" Foreground="#64748B" />
                         </DockPanel>
                         <ListBox Grid.Row="1" Background="Transparent" BorderThickness="0"
                                  ItemsSource="{Binding FilteredAssets}"
@@ -163,16 +174,18 @@
                                             <Image Source="{Binding ThumbnailPath}" Stretch="UniformToFill" />
                                         </Border>
                                         <StackPanel Grid.Column="1" Margin="10,1,0,0" VerticalAlignment="Center">
-                                            <TextBlock Text="{Binding FileName}" FontWeight="SemiBold" FontSize="11"
+                                            <TextBlock Text="{Binding FileName}" FontWeight="SemiBold" FontSize="12"
                                                        Foreground="#EEF2F7" TextTrimming="CharacterEllipsis" />
-                                            <TextBlock Text="{Binding DimensionsText}" FontSize="10" Foreground="#8793A5" Margin="0,3,0,6" />
+                                            <TextBlock Text="{Binding DimensionsText}" FontSize="11" Foreground="#94A3B8" Margin="0,3,0,6" />
                                             <StackPanel Orientation="Horizontal">
-                                                <Border Background="{Binding StatusBadgeColor}" CornerRadius="4" Padding="6,2" Margin="0,0,6,0">
-                                                    <TextBlock Text="{Binding Status}" Foreground="White" FontSize="9" FontWeight="Bold" />
+                                                <Border Background="{Binding StatusBadgeColor}" CornerRadius="4" Padding="7,3" Margin="0,0,6,0">
+                                                    <TextBlock Text="{Binding StatusLabel}" ToolTip="{Binding ResultHint}" Foreground="White" FontSize="11" FontWeight="Bold" />
                                                 </Border>
                                                 <TextBlock Text="{Binding AttemptCount, StringFormat='Intentos: {0}'}"
-                                                           FontSize="9" Foreground="#718096" VerticalAlignment="Center" />
+                                                           FontSize="11" Foreground="#CBD5E1" VerticalAlignment="Center" />
                                             </StackPanel>
+                                            <TextBlock Text="{Binding ResultHint}" ToolTip="{Binding ResultHint}" FontSize="11"
+                                                       Foreground="#E2E8F0" TextTrimming="CharacterEllipsis" Margin="0,5,0,0" />
                                         </StackPanel>
                                     </Grid>
                                 </DataTemplate>
@@ -183,7 +196,7 @@
                     <Border Grid.Row="3" Background="#151B24" BorderBrush="#28313F" BorderThickness="0,1,0,0" Padding="14,10">
                         <StackPanel Orientation="Horizontal">
                             <Ellipse Width="7" Height="7" Fill="#34D399" Margin="0,0,8,0" VerticalAlignment="Center" />
-                            <TextBlock Text="Originales protegidos" FontSize="10" Foreground="#A6B0BF" />
+                            <TextBlock Text="Originales protegidos" FontSize="11" Foreground="#A6B0BF" />
                         </StackPanel>
                     </Border>
                 </Grid>
@@ -204,12 +217,14 @@
                                            FontWeight="Bold" FontSize="14" Foreground="#F8FAFC" />
                                 <Border Background="{Binding SelectedAsset.StatusBadgeColor}" CornerRadius="5"
                                         Padding="7,3" Margin="11,0,0,0" VerticalAlignment="Center">
-                                    <TextBlock Text="{Binding SelectedAsset.Status, TargetNullValue='Sin selección'}"
-                                               Foreground="White" FontSize="9" FontWeight="Bold" />
+                                    <TextBlock Text="{Binding SelectedAsset.StatusLabel, TargetNullValue='Sin selección'}"
+                                               Foreground="White" FontSize="11" FontWeight="Bold" />
                                 </Border>
                             </StackPanel>
                             <TextBlock Text="{Binding SelectedAsset.OriginalFilePath, TargetNullValue='La comparación original / GPT aparecerá aquí'}"
-                                       FontSize="10" Foreground="#8490A1" TextTrimming="CharacterEllipsis" Margin="0,4,12,0" />
+                                       FontSize="11" Foreground="#CBD5E1" TextTrimming="CharacterEllipsis" Margin="0,4,12,0" />
+                            <TextBlock Text="{Binding SelectedAsset.ResultHint}" ToolTip="{Binding SelectedAsset.ResultHint}"
+                                       FontSize="11" Foreground="#FDE047" TextTrimming="CharacterEllipsis" Margin="0,3,12,0" />
                         </StackPanel>
                     </DockPanel>
                 </Border>
@@ -243,7 +258,7 @@
                     <Border Grid.Row="0" Background="#151B24" BorderBrush="#28313F" BorderThickness="0,0,0,1" Padding="15,0">
                         <DockPanel>
                             <Button Content="Ocultar" DockPanel.Dock="Right" Command="{Binding ToggleBrowserCommand}"
-                                    Padding="9,5" FontSize="10" VerticalAlignment="Center" />
+                                    Padding="9,5" FontSize="11" VerticalAlignment="Center" />
                             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                 <Border Background="#1E2D46" CornerRadius="7" Width="30" Height="30" Margin="0,0,10,0">
                                     <TextBlock Text="✦" Foreground="#8AB4FF" FontSize="16"
@@ -251,7 +266,7 @@
                                 </Border>
                                 <StackPanel VerticalAlignment="Center">
                                     <TextBlock Text="Asistente GPT" FontSize="12" FontWeight="Bold" Foreground="#F0F4FA" />
-                                    <TextBlock Text="Sesión del proveedor" FontSize="9" Foreground="#8490A1" Margin="0,2,0,0" />
+                                    <TextBlock Text="Sesión del proveedor" FontSize="11" Foreground="#8490A1" Margin="0,2,0,0" />
                                 </StackPanel>
                             </StackPanel>
                         </DockPanel>
@@ -267,35 +282,66 @@
 
         <Border Grid.Row="2" Background="#11161E" BorderBrush="#28313F" BorderThickness="0,1,0,0" Padding="14,10">
             <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                    <Button Content="▶  Iniciar cola" Style="{StaticResource AccentButton}"
-                            Command="{Binding StartQueueCommand}" Margin="0,0,7,0" Padding="12,8" />
-                    <Button Content="Pausar" Command="{Binding PauseQueueCommand}" Margin="0,0,7,0" Padding="11,8" />
-                    <Button Content="Continuar" Command="{Binding ResumeQueueCommand}" Margin="0,0,7,0" Padding="11,8" />
-                    <Button Content="Cancelar" Style="{StaticResource DangerButton}"
-                            Command="{Binding CancelCurrentCommand}" Margin="0,0,7,0" Padding="11,8" />
-                    <Button Content="Reintentar foto" Command="{Binding RetrySelectedCommand}" Padding="11,8" />
-                    <Button Content="Reiniciar estados" Click="OnResetAllProcessingStatesClicked"
-                            Margin="7,0,0,0" Padding="11,8"
-                            ToolTip="Devuelve todas las fotos de esta biblioteca a Pendiente y conserva intentos y resultados." />
-                </StackPanel>
-                <Grid Grid.Column="1" VerticalAlignment="Center" Margin="22,0,0,0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <WrapPanel Grid.Row="0" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button Content="{Binding QueuePrimaryActionLabel}" Style="{StaticResource AccentButton}"
+                            Command="{Binding StartQueueCommand}" IsEnabled="{Binding CanStartQueue}"
+                            ToolTip="{Binding QueuePrimaryActionHint}"
+                            Margin="0,0,7,0" Padding="14,9" FontSize="12" />
+                    <Button Content="{Binding PauseResumeLabel}" Command="{Binding ToggleQueuePauseCommand}"
+                            IsEnabled="{Binding CanPauseResumeQueue}" Margin="0,0,7,0" Padding="12,9" />
+                    <Button Content="Cancelar actual" Command="{Binding CancelCurrentCommand}"
+                            IsEnabled="{Binding CanCancelCurrent}" Margin="0,0,16,0" Padding="12,9"
+                            ToolTip="Cancela la espera local. Si GPT ya recibió el prompt, conserva la operación para recuperación; no cancela la generación remota." />
+                    <Button Content="{Binding SelectedActionLabel}" Command="{Binding RetrySelectedCommand}"
+                            IsEnabled="{Binding CanRetrySelected}" ToolTip="{Binding SelectedActionHint}" Padding="12,9"
+                            Background="#1E293B" BorderBrush="#3B82F6" Foreground="#93C5FD" />
+                    <Menu Margin="8,0,0,0" VerticalAlignment="Center" Background="#1E2633" BorderBrush="#374151" BorderThickness="1">
+                        <MenuItem Header="Acciones de biblioteca" Padding="12,9" IsEnabled="{Binding CanUseQuickActions}">
+                            <MenuItem Header="Reintentar lista visible…" Tag="Visible" Click="OnRetryGroupClicked" />
+                            <Separator />
+                            <MenuItem Header="Reintentar fallidas…" Tag="Failed" Click="OnRetryGroupClicked" />
+                            <MenuItem Header="Reintentar revisión con resultado…" Tag="Review" Click="OnRetryGroupClicked" />
+                            <MenuItem Header="Recuperar / reintentar sin resultado…" Tag="Missing" Click="OnRetryGroupClicked" />
+                            <MenuItem Header="Nueva generación para casos sin enlace…" Tag="ReplaceMissing" Click="OnRetryGroupClicked" />
+                            <Separator />
+                            <MenuItem Header="Guardar copias de resultados visibles…" Click="OnSaveVisibleCopiesClicked" />
+                            <MenuItem Header="Activar copias automáticas y guardar historial…" Click="OnEnableAutomaticCopiesClicked" />
+                            <MenuItem Header="Desactivar copias automáticas" Click="OnDisableAutomaticCopiesClicked" />
+                            <MenuItem Header="Abrir carpeta de resultados" Click="OnOpenResultsFolderClicked" />
+                            <Separator />
+                            <MenuItem Header="Actualizar estados y archivos" Command="{Binding RefreshLibrarySafelyCommand}" />
+                            <Separator />
+                            <MenuItem Header="Avanzado">
+                                <MenuItem Header="Reiniciar todos los estados…" Click="OnResetAllProcessingStatesClicked"
+                                          ToolTip="Solicita confirmación. Conserva originales, intentos y resultados; no borra operaciones enviadas." />
+                                <MenuItem Header="Copiar diagnóstico GPT" Click="OnCopyGptDiagnosticsClicked" />
+                            </MenuItem>
+                        </MenuItem>
+                    </Menu>
+                </WrapPanel>
+                <Grid Grid.Row="1" VerticalAlignment="Center" Margin="0,8,0,0">
                     <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
                     <DockPanel Grid.Row="0" Margin="0,0,0,6">
-                        <TextBlock Text="{Binding QueueStatusText}" FontSize="10" Foreground="#C5CEDA"
-                                   TextTrimming="CharacterEllipsis" />
-                        <TextBlock Text="GPT · Barrier 3 · revisión humana" FontSize="9" Foreground="#7F8CA0"
-                                   HorizontalAlignment="Right" />
+                        <TextBlock Text="{Binding AutomaticCopiesLabel}" ToolTip="{Binding AutomaticCopiesLabel}" FontSize="11" Foreground="#94A3B8"
+                                   DockPanel.Dock="Right" Margin="16,0,0,0" />
+                        <StackPanel>
+                            <TextBlock Text="{Binding QueuePhaseLabel}" FontSize="12" FontWeight="Bold" Foreground="#60A5FA" />
+                            <TextBlock Text="{Binding QueueStatusText}" ToolTip="{Binding QueueStatusText}" FontSize="12" Foreground="#F8FAFC"
+                                       TextWrapping="Wrap" MaxHeight="48" Margin="0,4,0,0" />
+                        </StackPanel>
                     </DockPanel>
                     <ProgressBar Grid.Row="1" Height="5" Background="#202734" Foreground="#3478E5"
-                                 BorderThickness="0" IsIndeterminate="{Binding IsQueueRunning}" />
+                                 BorderThickness="0" IsIndeterminate="{Binding IsQueueActivelyProcessing}" />
+                    <TextBlock Grid.Row="2" Text="{Binding QuickActionMessage}" ToolTip="{Binding QuickActionMessage}"
+                               FontSize="11" Foreground="#93C5FD" TextTrimming="CharacterEllipsis" Margin="0,8,0,0" />
                 </Grid>
             </Grid>
         </Border>

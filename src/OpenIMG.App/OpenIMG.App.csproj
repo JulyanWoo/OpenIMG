@@ -6,7 +6,7 @@
     <ProjectReference Include="..\OpenIMG.Infrastructure\OpenIMG.Infrastructure.csproj" />
   </ItemGroup>
 
-  <ItemGroup Condition="Exists('..\..\models')">
+  <ItemGroup Condition="Exists('..\..\models') and '$(OpenIMGIncludeLocalModels)' == 'true'">
     <Content Include="..\..\models\**\*">
       <Link>models\%(RecursiveDir)%(Filename)%(Extension)</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
@@ -37,7 +37,7 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
     <Version>0.1.0</Version>
-    <InformationalVersion>0.1.0-rc.3</InformationalVersion>
+    <InformationalVersion>0.1.0-stabilization.1</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <ApplicationIcon Condition="Exists('Assets\OpenIMG.ico')">Assets\OpenIMG.ico</ApplicationIcon>
     <Nullable>enable</Nullable>

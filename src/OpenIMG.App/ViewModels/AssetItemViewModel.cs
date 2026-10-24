@@ -2,6 +2,7 @@ using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using OpenIMG.Core.Entities;
 using OpenIMG.Core.Enums;
+using OpenIMG.Application.Restoration;
 
 namespace OpenIMG.App.ViewModels;
 
@@ -22,6 +23,18 @@ public partial class AssetItemViewModel : ObservableObject
     private int _attemptCount;
 
     public Guid Id => Asset.Id;
+    public ImageWorkState WorkState { get; private set; } = new(null, false, false, false, false, "");
+    public string ResultHint => WorkState.Hint;
+    public string StatusLabel => WorkState.MissingResult ? "Sin resultado" : Status switch
+    {
+        ImageProcessingStatus.NeedsReview => "Por revisar",
+        ImageProcessingStatus.Accepted => "Aceptada",
+        ImageProcessingStatus.Failed => WorkState.HasCurrentResult ? "Rechazada / fallida" : "Fallida",
+        ImageProcessingStatus.Pending => "Pendiente",
+        ImageProcessingStatus.Cancelled => "Cancelada",
+        ImageProcessingStatus.Paused => "Pausada",
+        _ => "En curso"
+    };
     public string FileName => Asset.OriginalFileName;
     public string OriginalFilePath => Asset.OriginalFilePath;
     public string Sha256Hash => Asset.Sha256Hash;
@@ -59,12 +72,12 @@ public partial class AssetItemViewModel : ObservableObject
         ThumbnailPath = Asset.ThumbnailPath;
         var latestJob = Asset.ProcessingJobs.OrderByDescending(j => j.CreatedAt).FirstOrDefault();
         AttemptCount = latestJob?.AttemptCount ?? 0;
-        var latestAvailableCandidate = Asset.ProcessingJobs
-            .SelectMany(job => job.Attempts)
-            .Where(attempt => !string.IsNullOrWhiteSpace(attempt.GeneratedImagePath) && File.Exists(attempt.GeneratedImagePath))
-            .OrderByDescending(attempt => attempt.CompletedAt ?? attempt.CreatedAt)
-            .FirstOrDefault();
+        var latestAvailableCandidate = ImageWorkState.LatestAvailableAttempt(Asset);
         RestoredImagePath = latestAvailableCandidate?.GeneratedImagePath;
+        WorkState = ImageWorkState.Read(Asset);
+        OnPropertyChanged(nameof(WorkState));
+        OnPropertyChanged(nameof(ResultHint));
+        OnPropertyChanged(nameof(StatusLabel));
         OnPropertyChanged(nameof(StatusBadgeColor));
     }
 }

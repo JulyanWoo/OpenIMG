@@ -9,6 +9,7 @@ using Microsoft.Extensions.Logging;
 using OpenIMG.App.Browser;
 using OpenIMG.App.Composition;
 using OpenIMG.App.ViewModels;
+using OpenIMG.App.Helpers;
 using OpenIMG.Application.Abstractions.AI;
 using OpenIMG.Application.Abstractions.Orchestration;
 using OpenIMG.Application.Abstractions.Persistence;
@@ -36,9 +37,17 @@ namespace OpenIMG.App;
 public partial class App : System.Windows.Application
 {
     private IHost? _host;
+    private bool _ownsRuntimeInstance;
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        var deploymentErrors = DeploymentIntegrity.Verify();
+        if (deploymentErrors.Length > 0)
+        {
+            MessageBox.Show("La instalación contiene archivos que no corresponden al mismo build. Extrae de nuevo la carpeta completa de OpenIMG; tus datos de usuario no se modificaron.",
+                "OpenIMG — instalación incompleta", MessageBoxButton.OK, MessageBoxImage.Warning);
+            Shutdown();return;
+        }
 
         var options = SettingsService.LoadOrCreateSettings();
 #if !OPENIMG_ENGINEERING
@@ -59,6 +68,7 @@ public partial class App : System.Windows.Application
         }
 #endif
         SerilogConfiguration.ConfigureLogging(options.LogsDirectory, options.LogLevel);
+        Log.Information("OpenIMG startup build identity: {BuildIdentity}", System.Text.Json.JsonSerializer.Serialize(OpenImgBuildIdentity.Snapshot()));
 
 #if OPENIMG_ENGINEERING
         var isHeadlessCommand = e.Args.Contains("--phase4c2-historical-revalidation");
@@ -87,7 +97,13 @@ public partial class App : System.Windows.Application
 #endif
         if (!isHeadlessCommand)
         {
-            WebView2ProcessHelper.EnsureSingleInstance();
+            if (!WebView2ProcessHelper.EnsureSingleInstance(SettingsService.DefaultBaseDirectory))
+            {
+                MessageBox.Show("OpenIMG ya está abierto con esta biblioteca. Cierra esa ventana antes de abrir otra instancia.", "OpenIMG", MessageBoxButton.OK, MessageBoxImage.Information);
+                Shutdown();
+                return;
+            }
+            _ownsRuntimeInstance = true;
             WebView2ProcessHelper.TerminateLingeringWebViewProcesses(options.GptWebView2ProfilePath);
         }
 
@@ -227,12 +243,16 @@ public partial class App : System.Windows.Application
         // Forced process termination is a last-resort recovery mechanism, only for proven OpenIMG processes
         try
         {
-            var appOptions = SettingsService.LoadOrCreateSettings();
-            WebView2ProcessHelper.TerminateLingeringWebViewProcesses(appOptions.GptWebView2ProfilePath);
+            if (_ownsRuntimeInstance)
+            {
+                var appOptions = SettingsService.LoadOrCreateSettings();
+                WebView2ProcessHelper.TerminateLingeringWebViewProcesses(appOptions.GptWebView2ProfilePath);
+            }
         }
         catch { }
 
         Log.CloseAndFlush();
+        WebView2ProcessHelper.ReleaseSingleInstance();
         base.OnExit(e);
     }
 }

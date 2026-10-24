@@ -56,6 +56,7 @@ public partial class MainWindow : Window
         InitializeComponent();
         _viewModel = viewModel;
         _gptWebClient = gptWebClient;
+        _gptWebClient.ResultStageChanged += OnGptResultStageChanged;
         _serviceProvider = serviceProvider;
         _options = options;
 #if OPENIMG_ENGINEERING
@@ -112,6 +113,7 @@ public partial class MainWindow : Window
 
     private void OnMainWindowClosed(object? sender, EventArgs e)
     {
+        _gptWebClient.ResultStageChanged -= OnGptResultStageChanged;
         try
         {
             WebView2ProcessHelper.TerminateLingeringWebViewProcesses(_options.GptWebView2ProfilePath);
