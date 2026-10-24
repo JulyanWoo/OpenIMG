@@ -12,6 +12,7 @@ using OpenIMG.Application.Parsing;
 using OpenIMG.Application.Prompts;
 using OpenIMG.Application.Validation;
 using OpenIMG.Application.Policies;
+using OpenIMG.Application.Restoration;
 using OpenIMG.Core.Entities;
 using OpenIMG.Core.Enums;
 using OpenIMG.Core.Models;
@@ -122,7 +123,9 @@ public class ImageProcessingOrchestrator : IImageProcessingOrchestrator
         var incompleteAttempts = existingAttempts.Where(a => a.CompletedAt == null).ToList();
         var ambiguousAttempt = existingAttempts.FirstOrDefault(a =>
             ProviderOperationRecoveryPolicy.MayHaveSubmittedGeneration(a.ProviderOperationState));
-        if (ambiguousAttempt != null)
+        var recoveryContext = ambiguousAttempt is null ? null : GenerationRecoveryCheckpoint.Restore(ambiguousAttempt, asset, sourceHashBefore);
+        var recoveryAttempt = recoveryContext is null ? null : ambiguousAttempt;
+        if (ambiguousAttempt != null && recoveryContext is null)
         {
             ambiguousAttempt.ProviderOperationState = ProviderOperationState.NeedsRecovery;
             ambiguousAttempt.ProviderFailureCategory ??= "NeedsRecovery";
@@ -142,12 +145,14 @@ public class ImageProcessingOrchestrator : IImageProcessingOrchestrator
                 AttemptNumber = ambiguousAttempt.AttemptNumber,
                 OutputPath = ambiguousAttempt.GeneratedImagePath,
                 FailureReason = RestorationFailureReason.OperationRecoveryRequired,
-                ErrorMessage = ambiguousAttempt.FailureDetails
+                ErrorMessage = ambiguousAttempt.FailureDetails,
+                QueuePauseRequested = true
             };
         }
 
         foreach (var safeToRetry in incompleteAttempts)
         {
+            if (safeToRetry.Id == recoveryAttempt?.Id) continue;
             safeToRetry.ProviderOperationState = ProviderOperationState.Failed;
             safeToRetry.ProviderFailureCategory ??= "SafeToRetryBeforeSubmission";
             safeToRetry.FailureDetails ??= "OpenIMG stopped before the GPT submission checkpoint; no generation was submitted.";
@@ -156,7 +161,11 @@ public class ImageProcessingOrchestrator : IImageProcessingOrchestrator
         }
         var completedAttempts = existingAttempts.Count(a => a.CompletedAt != null) + incompleteAttempts.Count;
 
-        if (asset.Status == ImageProcessingStatus.Pending && job.AttemptCount >= _options.MaxAutomaticAttempts)
+        if (recoveryAttempt != null)
+        {
+            progressReporter?.Invoke("Recuperando la descarga GPT existente; no se enviará otra generación…");
+        }
+        else if (asset.Status == ImageProcessingStatus.Pending && job.AttemptCount >= _options.MaxAutomaticAttempts)
         {
             job.AttemptCount = 0;
             await _assetRepository.UpdateJobAsync(job, cancellationToken);
@@ -270,7 +279,8 @@ public class ImageProcessingOrchestrator : IImageProcessingOrchestrator
         string? failureFeedback = null;
         ProcessingResult? finalResult = null;
 
-        for (int attemptNum = job.AttemptCount + 1; attemptNum <= _options.MaxAutomaticAttempts; attemptNum++)
+        for (int attemptNum = recoveryAttempt?.AttemptNumber ?? job.AttemptCount + 1;
+             attemptNum <= Math.Max(_options.MaxAutomaticAttempts, recoveryAttempt?.AttemptNumber ?? 0); attemptNum++)
         {
             job.AttemptCount = attemptNum;
             _logger.LogInformation("Processing attempt {Attempt} for asset {FileName}", attemptNum, asset.OriginalFileName);
@@ -287,7 +297,7 @@ public class ImageProcessingOrchestrator : IImageProcessingOrchestrator
                     cancellationToken);
             }
 
-            var prompt = PromptCompiler.BuildRestorationPrompt(
+            var prompt = recoveryAttempt?.RestorationPrompt ?? PromptCompiler.BuildRestorationPrompt(
                 canonicalContract,
                 _analysisContractAdapter,
                 attemptNum,
@@ -298,8 +308,8 @@ public class ImageProcessingOrchestrator : IImageProcessingOrchestrator
                 localCompaction?.Assemblies,
                 localCompaction?.IndividualCriticalRegionIds);
 
-            var generationOpId = $"{asset.Id}_att{attemptNum}_{Guid.NewGuid():N}";
-            var attempt = new RestorationAttempt
+            var generationOpId = recoveryAttempt?.ProviderOperationId ?? $"{asset.Id}_att{attemptNum}_{Guid.NewGuid():N}";
+            var attempt = recoveryAttempt ?? new RestorationAttempt
             {
                 ProcessingJobId = job.Id,
                 AttemptNumber = attemptNum,
@@ -310,10 +320,13 @@ public class ImageProcessingOrchestrator : IImageProcessingOrchestrator
                 ProviderOperationState = ProviderOperationState.GenerationPrepared,
                 CreatedAt = DateTimeOffset.UtcNow
             };
-            await _assetRepository.AddAttemptAsync(attempt, cancellationToken);
+            if (recoveryAttempt is null)
+                await _assetRepository.AddAttemptAsync(attempt, cancellationToken);
 
             // Step 5: Restoration Generation & Download
-            progressReporter?.Invoke($"Generating GPT restoration (Attempt {attemptNum})...");
+            progressReporter?.Invoke(recoveryAttempt is null
+                ? $"Generating GPT restoration (Attempt {attemptNum})..."
+                : "Recuperando la imagen de la operación GPT anterior…");
             _logger.LogInformation("[{Timestamp}] State Transition: Asset {FileName} (ID: {AssetId}) -> Restoring (Attempt {Attempt})",
                 DateTimeOffset.UtcNow.ToString("o"), asset.OriginalFileName, asset.Id, attemptNum);
 
@@ -324,7 +337,7 @@ public class ImageProcessingOrchestrator : IImageProcessingOrchestrator
             await _assetRepository.UpdateJobAsync(job, cancellationToken);
 
             string downloadedTempPath;
-            var ownershipContext = new GenerationOwnershipContext
+            var ownershipContext = recoveryContext ?? new GenerationOwnershipContext
             {
                 GenerationOperationId = generationOpId,
                 AssetId = asset.Id.ToString(),
@@ -334,12 +347,29 @@ public class ImageProcessingOrchestrator : IImageProcessingOrchestrator
             ownershipContext.PersistOperationStateAsync = async (state, token) =>
             {
                 attempt.ProviderOperationState = state;
+                attempt.RawResponse = GenerationRecoveryCheckpoint.Capture(ownershipContext, prompt);
                 if (state == ProviderOperationState.CandidateDownloaded)
                 {
                     attempt.GeneratedImagePath = ownershipContext.DownloadedTempPath;
                     attempt.GeneratedSha256 = ownershipContext.DownloadedCandidateSha256;
                 }
                 await _assetRepository.UpdateAttemptAsync(attempt, token);
+                _logger.LogInformation("[{OperationId}] GPT stage {ProviderStage}; persisted state {ProviderState}.",
+                    generationOpId, ownershipContext.ProviderFailureStage, state);
+                progressReporter?.Invoke(state == ProviderOperationState.CandidateDownloaded ? "GPT: archivo descargado; verificando y guardando resultado…"
+                    : ownershipContext.ProviderFailureStage switch
+                    {
+                        "BrowserLock" => "GPT: esperando acceso al navegador…",
+                        "Readiness" => "GPT: comprobando sesión y compositor…",
+                        "ConversationStart" => "GPT: preparando conversación nueva…",
+                        "AttachmentUpload" => "GPT: adjuntando imagen original…",
+                        "PromptInsertion" => "GPT: insertando y verificando instrucciones…",
+                        "UsageBudget" => "GPT: comprobando disponibilidad antes del envío…",
+                        "PromptSubmission" => "GPT: enviando una vez y esperando confirmación…",
+                        "Generation" => "GPT: mensaje aceptado; esperando imagen terminada…",
+                        "Download" => "GPT: buscando imagen de la operación y preparando descarga…",
+                        _ => "GPT: procesando operación…"
+                    });
             };
 
             try
@@ -350,12 +380,13 @@ public class ImageProcessingOrchestrator : IImageProcessingOrchestrator
             }
             catch (ProviderUsageLimitException ex)
             {
-                var generationMayExist = ownershipContext.OperationState is ProviderOperationState.GenerationMayExist or
-                    ProviderOperationState.GenerationSubmitted or ProviderOperationState.CandidateDownloaded;
+                var generationMayExist = ProviderOperationRecoveryPolicy.MayHaveSubmittedGeneration(ownershipContext.OperationState);
                 attempt.ProviderFailureCategory = string.Equals(ownershipContext.ProviderFailureStage, "RateLimited", StringComparison.OrdinalIgnoreCase)
                     ? "RateLimited"
                     : "UsageBudgetReached";
                 attempt.ProviderOperationState = generationMayExist ? ProviderOperationState.NeedsRecovery : ownershipContext.OperationState;
+                ownershipContext.OperationState = attempt.ProviderOperationState;
+                attempt.RawResponse = GenerationRecoveryCheckpoint.Capture(ownershipContext, prompt);
                 attempt.FailureReason = generationMayExist
                     ? RestorationFailureReason.OperationRecoveryRequired
                     : RestorationFailureReason.ProviderUsageLimitReached;
@@ -390,15 +421,17 @@ public class ImageProcessingOrchestrator : IImageProcessingOrchestrator
                         ? RestorationFailureReason.OperationRecoveryRequired
                         : RestorationFailureReason.ProviderUsageLimitReached,
                     ErrorMessage = ex.Message,
-                    QueuePauseRequested = !generationMayExist
+                    QueuePauseRequested = true
                 };
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Restoration generation failed on attempt {Attempt} (OpId: {OpId})", attemptNum, generationOpId);
-                if (ownershipContext.OperationState is ProviderOperationState.GenerationMayExist or ProviderOperationState.GenerationSubmitted or ProviderOperationState.CandidateDownloaded)
+                if (ProviderOperationRecoveryPolicy.MayHaveSubmittedGeneration(ownershipContext.OperationState))
                 {
                     attempt.ProviderOperationState = ProviderOperationState.NeedsRecovery;
+                    ownershipContext.OperationState = ProviderOperationState.NeedsRecovery;
+                    attempt.RawResponse = GenerationRecoveryCheckpoint.Capture(ownershipContext, prompt);
                     attempt.ProviderFailureCategory = ClassifyProviderFailure(ownershipContext, ex);
                     attempt.FailureReason = RestorationFailureReason.OperationRecoveryRequired;
                     attempt.FailureDetails = "GPT may have accepted this operation. OpenIMG will not automatically submit it again. " + DescribeProviderFailure(ownershipContext, ex);
@@ -418,7 +451,45 @@ public class ImageProcessingOrchestrator : IImageProcessingOrchestrator
                         AttemptNumber = attemptNum,
                         OutputPath = attempt.GeneratedImagePath,
                         FailureReason = RestorationFailureReason.OperationRecoveryRequired,
-                        ErrorMessage = attempt.FailureDetails
+                        ErrorMessage = attempt.FailureDetails,
+                        QueuePauseRequested = true
+                    };
+                }
+
+                var providerStage = ownershipContext.ProviderReadinessFailureStage ?? ownershipContext.ProviderFailureStage;
+                if (!string.IsNullOrWhiteSpace(providerStage))
+                {
+                    var failureCategory = ClassifyProviderFailure(ownershipContext, ex);
+                    var failureReason = failureCategory switch
+                    {
+                        "AuthenticationRequired" => RestorationFailureReason.AuthenticationRequired,
+                        "RateLimited" or "UsageBudgetReached" => RestorationFailureReason.ProviderUsageLimitReached,
+                        "AttachmentUploadFailed" => RestorationFailureReason.UploadFailed,
+                        _ => RestorationFailureReason.BrowserUnavailable
+                    };
+                    attempt.ProviderOperationState = ProviderOperationState.Failed;
+                    attempt.ProviderFailureCategory = failureCategory;
+                    attempt.FailureReason = failureReason;
+                    attempt.FailureDetails = DescribeProviderFailure(ownershipContext, ex);
+                    attempt.FinalDecision = ValidationDecision.NeedsReview;
+                    attempt.CompletedAt = DateTimeOffset.UtcNow;
+                    await _assetRepository.UpdateAttemptAsync(attempt, cancellationToken);
+
+                    asset.Status = ImageProcessingStatus.Pending;
+                    job.Status = ImageProcessingStatus.Paused;
+                    job.FailureReason = failureReason;
+                    job.ErrorMessage = attempt.FailureDetails;
+                    job.CurrentStep = "Paused after a GPT provider warning or failure";
+                    await _assetRepository.UpdateAsync(asset, cancellationToken);
+                    await _assetRepository.UpdateJobAsync(job, cancellationToken);
+                    return new ProcessingResult
+                    {
+                        Success = false,
+                        Decision = ValidationDecision.NeedsReview,
+                        AttemptNumber = attemptNum,
+                        FailureReason = failureReason,
+                        ErrorMessage = attempt.FailureDetails,
+                        QueuePauseRequested = true
                     };
                 }
 
@@ -433,6 +504,10 @@ public class ImageProcessingOrchestrator : IImageProcessingOrchestrator
             }
 
             attempt.GeneratedImagePath = downloadedTempPath;
+            attempt.CompletedAt = null;
+            attempt.FailureReason = null;
+            attempt.FailureDetails = null;
+            attempt.ProviderFailureCategory = null;
             attempt.GeneratedSha256 = await _fileService.ComputeSha256Async(downloadedTempPath, cancellationToken);
             attempt.ProviderOperationState = ProviderOperationState.ValidationPending;
             await _assetRepository.UpdateAttemptAsync(attempt, cancellationToken);
@@ -526,7 +601,11 @@ public class ImageProcessingOrchestrator : IImageProcessingOrchestrator
             finalImagePath = Path.Combine(targetFolder, destFileName);
             File.Copy(downloadedTempPath, finalImagePath, overwrite: false);
             attempt.GeneratedImagePath = finalImagePath;
+            ownershipContext.PersistedCandidatePath = finalImagePath;
+            ownershipContext.PersistedCandidateSha256 = attempt.GeneratedSha256;
+            ownershipContext.OperationState = ProviderOperationState.Finalized;
             attempt.ProviderOperationState = ProviderOperationState.Finalized;
+            attempt.RawResponse = GenerationRecoveryCheckpoint.Capture(ownershipContext, prompt);
             await _assetRepository.UpdateAttemptAsync(attempt, cancellationToken);
 
             // Save sidecar metadata
@@ -589,7 +668,7 @@ public class ImageProcessingOrchestrator : IImageProcessingOrchestrator
                 GeminiOperationsTotal = attempt.GeminiOperationsTotal
             };
 
-            if (combinedDecision == ValidationDecision.Accepted || !retryEval.ShouldRetry)
+            if (combinedDecision == ValidationDecision.Accepted || !retryEval.ShouldRetry || recoveryAttempt is not null)
             {
                 if (!retryEval.ShouldRetry && combinedDecision != ValidationDecision.Accepted)
                 {

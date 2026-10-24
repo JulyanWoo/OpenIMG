@@ -12,8 +12,18 @@ public class SettingsService
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     };
 
-    public static string DefaultBaseDirectory =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OpenIMG");
+    public static string DefaultBaseDirectory
+    {
+        get
+        {
+            var isolated = Environment.GetEnvironmentVariable("OPENIMG_RUNTIME_ROOT");
+            if (string.IsNullOrWhiteSpace(isolated))
+                return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OpenIMG");
+            if (!Path.IsPathFullyQualified(isolated))
+                throw new InvalidOperationException("OPENIMG_RUNTIME_ROOT must be an absolute per-user directory.");
+            return Path.GetFullPath(isolated);
+        }
+    }
 
     public static string DefaultSettingsPath =>
         Path.Combine(DefaultBaseDirectory, "settings.json");
@@ -39,6 +49,7 @@ public class SettingsService
                     var legacyFlagsOutOfSync = schemaVersion <= OpenImgOptions.CurrentSettingsSchemaVersion &&
                         (options.AllowSceneCleanup != (options.SceneCleanupMode != OpenIMG.Core.Enums.SceneCleanupMode.Disabled) ||
                          options.AllowPersonRemoval != (options.PersonRemovalMode != OpenIMG.Core.Enums.PersonRemovalMode.Disabled));
+                    var gptBudgetWasEnabled = options.DualModelRestoration?.GptBudget?.Enabled == true;
 
                     if (needsMigration)
                     {
@@ -68,7 +79,8 @@ public class SettingsService
                     }
 
                     EnsureDefaultPaths(options, dir);
-                    if (needsMigration || legacyFlagsOutOfSync)
+                    var gptBudgetEnabledAfterNormalization = options.DualModelRestoration?.GptBudget?.Enabled == true;
+                    if (needsMigration || legacyFlagsOutOfSync || (gptBudgetWasEnabled && !gptBudgetEnabledAfterNormalization))
                         SaveSettings(options, path);
 
                     return options;
@@ -132,15 +144,16 @@ public class SettingsService
         options.DualModelRestoration ??= new DualModelRestorationOptions();
         options.DualModelRestoration.GptBudget ??= new ProviderUsageBudgetOptions
         {
-            Enabled = true,
+            Enabled = false,
             MaxOperationsPerWindow = 40,
             WindowDurationMinutes = 180,
             SafetyReserve = 5,
             OptionalMaxOperationsPerDay = 120
         };
-        // GPT quota enforcement is a product safety invariant, not an optional
-        // toggle. The configured values remain operator-editable.
-        options.DualModelRestoration.GptBudget.Enabled = true;
+        // Local hourly/daily caps are disabled. Provider-reported blocking
+        // warnings remain the stop signal; reservations still prevent replaying
+        // the same operation ID and preserve durable usage history.
+        options.DualModelRestoration.GptBudget.Enabled = false;
 
         if (string.IsNullOrWhiteSpace(options.DatabasePath))
             options.DatabasePath = Path.Combine(baseDir, "openimg.db");

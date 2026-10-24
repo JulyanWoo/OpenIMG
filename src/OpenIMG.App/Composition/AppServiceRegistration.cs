@@ -56,6 +56,8 @@ internal static class AppServiceRegistration
         services.AddSingleton<IProviderUsageRepository, ProviderUsageRepository>();
 
         services.AddSingleton<IFileSystemService, FileSystemService>();
+        services.AddSingleton<ResultCopyService>();
+        services.AddSingleton<ImageRetryService>();
         services.AddSingleton<ProjectSourceFolderMonitor>();
         services.AddSingleton<ProjectSourceImageImporter>();
         services.AddSingleton<ILocalImageValidator, OpenCvImageValidator>();

@@ -37,11 +37,9 @@ public sealed class ProviderUsageBudget
 
         if (!options.Enabled)
         {
-            return new(true, "BudgetDisabled", 0, options.EffectiveAutomaticBudget, null)
+            return new(true, "BudgetDisabled", 0, 0, null)
             {
-                EffectiveDailyBudget = options.OptionalMaxOperationsPerDay is int maxPerDay
-                    ? Math.Max(0, maxPerDay - Math.Max(0, options.SafetyReserve))
-                    : null
+                EffectiveDailyBudget = null
             };
         }
 

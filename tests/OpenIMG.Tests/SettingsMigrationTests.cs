@@ -11,9 +11,9 @@ namespace OpenIMG.Tests;
 public sealed class SettingsMigrationTests
 {
     [Fact]
-    public void LegacySettings_MigrateToOneTypedCleanupPolicyAndPersistVersionTwo()
+    public void LegacySettings_MigrateToTypedCleanupPolicyAndPersistCurrentVersion()
     {
-        var workspace = TestArtifactWorkspace.Create(nameof(LegacySettings_MigrateToOneTypedCleanupPolicyAndPersistVersionTwo));
+        var workspace = TestArtifactWorkspace.Create(nameof(LegacySettings_MigrateToTypedCleanupPolicyAndPersistCurrentVersion));
         try
         {
             var settingsPath = Path.Combine(workspace, "settings.json");
@@ -94,6 +94,52 @@ public sealed class SettingsMigrationTests
             Assert.Equal(SceneCleanupMode.Disabled, options.SceneCleanupMode);
             Assert.Equal(PersonRemovalMode.Disabled, options.PersonRemovalMode);
             Assert.False(options.AllowSceneCleanup);
+        }
+        finally
+        {
+            Directory.Delete(workspace, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ExistingSettingsDisableLocalGptCapsWithoutChangingUserPaths()
+    {
+        var workspace = TestArtifactWorkspace.Create(nameof(ExistingSettingsDisableLocalGptCapsWithoutChangingUserPaths));
+        try
+        {
+            var settingsPath = Path.Combine(workspace, "settings.json");
+            var databasePath = Path.Combine(workspace, "user-data", "openimg.db");
+            var gptProfilePath = Path.Combine(workspace, "user-data", "WebView2Profile-GPT");
+            File.WriteAllText(settingsPath, $$"""
+                {
+                  "settingsSchemaVersion": 2,
+                  "databasePath": "{{databasePath.Replace("\\", "\\\\")}}",
+                  "gptWebView2ProfilePath": "{{gptProfilePath.Replace("\\", "\\\\")}}",
+                  "dualModelRestoration": {
+                    "gptBudget": {
+                      "enabled": true,
+                      "maxOperationsPerWindow": 40,
+                      "windowDurationMinutes": 180,
+                      "safetyReserve": 5,
+                      "optionalMaxOperationsPerDay": 120
+                    }
+                  }
+                }
+                """);
+
+            var options = SettingsService.LoadOrCreateSettings(settingsPath);
+
+            Assert.False(options.DualModelRestoration.GptBudget.Enabled);
+            Assert.Equal(databasePath, options.DatabasePath);
+            Assert.Equal(gptProfilePath, options.GptWebView2ProfilePath);
+            using var persisted = JsonDocument.Parse(File.ReadAllText(settingsPath));
+            Assert.Equal(OpenImgOptions.CurrentSettingsSchemaVersion,
+                persisted.RootElement.GetProperty("settingsSchemaVersion").GetInt32());
+            Assert.False(persisted.RootElement.GetProperty("dualModelRestoration")
+                .GetProperty("gptBudget").GetProperty("enabled").GetBoolean());
+            Assert.Equal(databasePath, persisted.RootElement.GetProperty("databasePath").GetString());
+            Assert.Equal(gptProfilePath, persisted.RootElement.GetProperty("gptWebView2ProfilePath").GetString());
+            Assert.False(Directory.Exists(Path.GetDirectoryName(databasePath)!));
         }
         finally
         {

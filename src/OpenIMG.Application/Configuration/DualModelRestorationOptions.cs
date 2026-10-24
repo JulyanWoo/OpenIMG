@@ -7,7 +7,7 @@ public sealed class DualModelRestorationOptions
     public ProviderUsageBudgetOptions GeminiBudget { get; set; } = new();
     public ProviderUsageBudgetOptions GptBudget { get; set; } = new()
     {
-        Enabled = true,
+        Enabled = false,
         MaxOperationsPerWindow = 40,
         WindowDurationMinutes = 180,
         SafetyReserve = 5,

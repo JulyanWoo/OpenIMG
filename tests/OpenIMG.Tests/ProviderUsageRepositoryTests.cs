@@ -11,6 +11,53 @@ namespace OpenIMG.Tests;
 public sealed class ProviderUsageRepositoryTests
 {
     [Fact]
+    public async Task DisabledGptCapAllowsReservationsBeyondHourlyAndDailyHistoryButKeepsDuplicateProtection()
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"openimg-gpt-unlimited-{Guid.NewGuid():N}.db");
+        try
+        {
+            var factory = new TestDbContextFactory($"Data Source={databasePath}");
+            await using (var context = await factory.CreateDbContextAsync())
+            {
+                await context.Database.EnsureCreatedAsync();
+                var now = DateTimeOffset.UtcNow;
+                context.ProviderUsageRecords.AddRange(Enumerable.Range(0, 130).Select(index => new OpenIMG.Core.Entities.ProviderUsageRecord
+                {
+                    Provider = "GPT",
+                    OperationId = $"historical-{index}",
+                    StartedAt = now.AddMinutes(-index)
+                }));
+                await context.SaveChangesAsync();
+            }
+
+            var repository = new ProviderUsageRepository(factory, new ProviderUsageBudget());
+            var noLocalCap = new ProviderUsageBudgetOptions
+            {
+                Enabled = false,
+                MaxOperationsPerWindow = 40,
+                WindowDurationMinutes = 180,
+                SafetyReserve = 5,
+                OptionalMaxOperationsPerDay = 120
+            };
+            var nowForReservation = DateTimeOffset.UtcNow;
+
+            var first = await repository.TryReserveAsync("GPT", "unlimited-operation", noLocalCap, nowForReservation);
+            var duplicate = await repository.TryReserveAsync("GPT", "unlimited-operation", noLocalCap, nowForReservation.AddSeconds(1));
+
+            Assert.True(first.Allowed);
+            Assert.False(duplicate.Allowed);
+            Assert.Equal("ProviderOperationAlreadyReserved", duplicate.Reason);
+            await using var verification = await factory.CreateDbContextAsync();
+            Assert.Equal(131, await verification.ProviderUsageRecords.CountAsync());
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (File.Exists(databasePath)) File.Delete(databasePath);
+        }
+    }
+
+    [Fact]
     public async Task RollingGptCeilingIsDurableAndOneOperationCannotBeReservedTwice()
     {
         var databasePath = Path.Combine(Path.GetTempPath(), $"openimg-gpt-budget-{Guid.NewGuid():N}.db");

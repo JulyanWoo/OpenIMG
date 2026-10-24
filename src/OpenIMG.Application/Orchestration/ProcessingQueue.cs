@@ -319,6 +319,7 @@ public class ProcessingQueue : IProcessingQueue
                         _currentItemCts.Token);
 
                     _processedItems++;
+                    _currentProcessingAsset = null;
                     NotifyProgress(
                         nextAsset.Id,
                         nextAsset.OriginalFileName,
@@ -328,7 +329,7 @@ public class ProcessingQueue : IProcessingQueue
                     if (result.QueuePauseRequested)
                     {
                         _isPaused = true;
-                        NotifyStateChanged(result.ErrorMessage ?? "Processing paused until GPT image-generation capacity is available.");
+                        NotifyStateChanged(result.ErrorMessage ?? "GPT reported a warning or provider failure; the queue is paused before the next image.");
                     }
                 }
                 catch (OperationCanceledException)
@@ -361,6 +362,7 @@ public class ProcessingQueue : IProcessingQueue
                 {
                     _currentItemCts?.Dispose();
                     _currentItemCts = null;
+                    _currentProcessingAsset = null;
                 }
             }
         }

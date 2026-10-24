@@ -5,7 +5,7 @@ namespace OpenIMG.Application.Configuration;
 public class OpenImgOptions
 {
     public const string SectionName = "OpenIMG";
-    public const int CurrentSettingsSchemaVersion = 2;
+    public const int CurrentSettingsSchemaVersion = 3;
 
     public int SettingsSchemaVersion { get; set; } = CurrentSettingsSchemaVersion;
 
