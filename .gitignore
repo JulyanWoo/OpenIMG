@@ -62,6 +62,39 @@ calibration/
 /REPOSITORY_HYGIENE.md
 /rules/
 
+## Generated packages and installers (source builds only)
+*.exe
+*.dll
+*.pdb
+*.msi
+*.msix
+*.msixbundle
+*.appx
+*.appxbundle
+*.zip
+*.7z
+*.rar
+*.nupkg
+*.snupkg
+
+## Disposable engineering reports and packaging plans
+/GPT_*.md
+/CLEAN_ROOM_ACCEPTANCE_PLAN.md
+/SECOND_PC_SAFE_RESET_PLAN.md
+/LICENSE_DECISION_REQUIRED.md
+/docs/GPT_LIVE_*.md
+/docs/GPT_GENERATION_WAIT_FIX.md
+
+## Local tool caches and browser recordings
+node_modules/
+__pycache__/
+.pytest_cache/
+.venv/
+playwright-report/
+test-results/
+*.har
+**/storage-state*.json
+
 ## Runtime state and private user data
 **/settings.json
 *.db
