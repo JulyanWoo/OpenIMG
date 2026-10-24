@@ -36,6 +36,13 @@
           Condition="'$(OpenIMGEngineeringBuild)' == 'true' and Exists('..\..\calibration\phase3\calibration_manifest.json')" />
   </ItemGroup>
 
+  <!-- The pre-stabilization reflection suite targets the removed RC6 session.
+       Current browser acceptance uses scripts/test-gpt-automation.ps1 against
+       the real client and both isolated backends. Preserve legacy source only. -->
+  <ItemGroup>
+    <Compile Remove="GptGeneratedImageDomTests.cs" />
+  </ItemGroup>
+
   <ItemGroup Condition="'$(OpenIMGEngineeringBuild)' != 'true'">
     <Compile Remove="DatabaseInspectionTests.cs;GeminiValidationParserTests.cs;GptCorrectiveProviderTests.cs;GptDirectRestorationPilotTests.cs;LiveAttemptsCalibrationEvaluationTests.cs;Phase36ValidationTests.cs;Phase3CalibrationTests.cs;Phase4AShadowModeEvaluationTests.cs;Phase4BPolicyCalibrationTests.cs;Phase4C1CompactionTests.cs;Phase4C1HighQualityConservativeTests.cs;Phase4C3HardwareAndColorTests.cs;Phase4C3RevalidationTests.cs;Phase4C4CalibrationTests.cs;Phase4C4RevalidationRunnerTests.cs;Phase4CLocalFirstActivationTests.cs;Phase4D1LiveVerificationTests.cs;Phase4DHistoricalEvaluationTests.cs;Phase4E2StrongPhotographicRestorationTests.cs;Phase4E3CalibrationTests.cs;Phase4EPilotTests.cs;Phase4F1ContractAuthorityTests.cs;Phase4F1PreflightTests.cs;Phase4F3NegativeSpaceTests.cs;Phase4F3PreflightTests.cs;Phase4F4CalibrationTests.cs" />
   </ItemGroup>

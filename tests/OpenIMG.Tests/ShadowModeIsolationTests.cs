@@ -12,6 +12,7 @@ using OpenIMG.Application.Configuration;
 using OpenIMG.Application.Orchestration;
 using OpenIMG.Application.Prompts;
 using OpenIMG.Application.Validation;
+using OpenIMG.Application.Restoration;
 using OpenIMG.Core.Entities;
 using OpenIMG.Core.Enums;
 using OpenIMG.Core.Models;
@@ -25,6 +26,8 @@ public class ShadowModeIsolationTests
     private class FakeAiProvider : IImageGenerationProvider
     {
         public int GenerationCallCount { get; private set; }
+        public int RecoveryCallCount { get; private set; }
+        public Exception? RecoveryFailure { get; set; }
         public string? LastPrompt { get; private set; }
         public FurnitureAnalysis BaselineAnalysis { get; set; } = new()
         {
@@ -59,7 +62,16 @@ public class ShadowModeIsolationTests
 
         public Task<string> GenerateRestorationScopedAsync(string imagePath, string restorationPrompt, string tempDownloadDirectory, GenerationOwnershipContext context, CancellationToken cancellationToken = default)
         {
-            GenerationCallCount++;
+            if (context.OperationState == ProviderOperationState.NeedsRecovery)
+            {
+                RecoveryCallCount++;
+                if (RecoveryFailure is not null)
+                {
+                    context.ProviderFailureStage = RecoveryFailure is ProviderUsageLimitException ? "RateLimited" : "Download";
+                    throw RecoveryFailure;
+                }
+            }
+            else GenerationCallCount++;
             LastPrompt = restorationPrompt;
             var opDir = Path.Combine(tempDownloadDirectory, context.GenerationOperationId);
             Directory.CreateDirectory(opDir);
@@ -273,7 +285,8 @@ public class ShadowModeIsolationTests
             {
                 LocalAnalysisMode = LocalAnalysisMode.Preferred,
                 RestorationProfile = "Conservative",
-                MaxAutomaticAttempts = 1
+                MaxAutomaticAttempts = 1,
+                OperationsDirectory = Path.Combine(tempDir, "operations")
             };
 
             var aiProvider = new FakeAiProvider();
@@ -347,7 +360,7 @@ public class ShadowModeIsolationTests
 
         try
         {
-            var options = new OpenImgOptions { LocalAnalysisMode = LocalAnalysisMode.Preferred, MaxAutomaticAttempts = 1 };
+            var options = new OpenImgOptions { LocalAnalysisMode = LocalAnalysisMode.Preferred, MaxAutomaticAttempts = 1, OperationsDirectory = Path.Combine(tempDir, "operations") };
             var gptProvider = new FakeAiProvider();
             var validator = new FakeValidator();
             var assetRepository = new FakeAssetRepository();
@@ -396,6 +409,65 @@ public class ShadowModeIsolationTests
     }
 
     [Theory]
+    [InlineData(null)]
+    [InlineData("Timeout")]
+    [InlineData("RateLimited")]
+    public async Task RetryingRecoverableOperationReusesAttemptRunsBarrier3AndPersistsCandidate(string? firstFailure)
+    {
+        var root = TestArtifactWorkspace.Create("orchestrator-download-recovery");
+        try
+        {
+            var source = Path.Combine(root, "source.png");
+            using (var mat = new Mat(200, 200, MatType.CV_8UC3, new Scalar(180, 180, 180))) mat.SaveImage(source);
+            var asset = new ImageAsset { OriginalFilePath = source, OriginalFileName = "source.png", Sha256Hash = "A1B2C3D4E5F6", Status = ImageProcessingStatus.Pending };
+            var job = new ProcessingJob { ImageAssetId = asset.Id, AttemptCount = 1 };
+            var context = new GenerationOwnershipContext
+            {
+                GenerationOperationId = "existing-operation-123", AssetId = asset.Id.ToString(), ExpectedSourceSha256 = asset.Sha256Hash,
+                ConversationPathAfterSubmit = "/c/existing-conversation", BaselineAssistantResponseCount = 0
+            };
+            var attempt = new RestorationAttempt
+            {
+                ProcessingJobId = job.Id, AttemptNumber = 1, ProviderOperationId = context.GenerationOperationId,
+                ProviderOperationState = ProviderOperationState.NeedsRecovery, RestorationPrompt = "Restore source",
+                CompletedAt = DateTimeOffset.UtcNow, RawResponse = GenerationRecoveryCheckpoint.Capture(context, "Restore source")
+            };
+            var repository = new FakeAssetRepository { ExistingJob = job, ExistingAttempts = [attempt] };
+            var provider = new FakeAiProvider();
+            var validator = new FakeValidator();
+            var options = new OpenImgOptions { LocalAnalysisMode = LocalAnalysisMode.Preferred, MaxAutomaticAttempts = 1, OperationsDirectory = Path.Combine(root, "operations") };
+            var orchestrator = new ImageProcessingOrchestrator(provider, validator, new FakeFileService(), repository,
+                new ValidationDecisionEngine(options), options, NullLogger<ImageProcessingOrchestrator>.Instance,
+                localAnalysisEngine: new ValidLocalAnalysisEngine());
+
+            if (firstFailure is not null)
+            {
+                provider.RecoveryFailure = firstFailure == "RateLimited"
+                    ? new ProviderUsageLimitException("Provider limit during recovery")
+                    : new TimeoutException("Owned download did not complete");
+                var stopped = await orchestrator.ProcessAssetAsync(new Project { OutputDirectory = Path.Combine(root, "output") }, asset);
+                Assert.True(stopped.QueuePauseRequested);
+                Assert.Equal(ProviderOperationState.NeedsRecovery, attempt.ProviderOperationState);
+                Assert.NotNull(GenerationRecoveryCheckpoint.Restore(attempt, asset, asset.Sha256Hash));
+                Assert.Equal(0, provider.GenerationCallCount);
+                provider.RecoveryFailure = null;
+                asset.Status = ImageProcessingStatus.Pending;
+            }
+
+            var result = await orchestrator.ProcessAssetAsync(new Project { OutputDirectory = Path.Combine(root, "output") }, asset);
+
+            Assert.Equal(0, provider.GenerationCallCount);
+            Assert.Equal(firstFailure is null ? 1 : 2, provider.RecoveryCallCount);
+            Assert.Equal(1, result.AttemptNumber);
+            Assert.NotNull(validator.ReceivedAnalysis);
+            Assert.True(File.Exists(result.OutputPath));
+            Assert.Equal(ProviderOperationState.Finalized, attempt.ProviderOperationState);
+            Assert.Equal(context.GenerationOperationId, attempt.ProviderOperationId);
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Theory]
     [InlineData(ProviderOperationState.GenerationSubmitted, false)]
     [InlineData(ProviderOperationState.NeedsRecovery, true)]
     public async Task SubmittedOperationAfterRestartRoutesToRecoveryWithoutGeneratingAgain(
@@ -410,7 +482,7 @@ public class ShadowModeIsolationTests
 
         try
         {
-            var options = new OpenImgOptions { LocalAnalysisMode = LocalAnalysisMode.Preferred, MaxAutomaticAttempts = 1 };
+            var options = new OpenImgOptions { LocalAnalysisMode = LocalAnalysisMode.Preferred, MaxAutomaticAttempts = 1, OperationsDirectory = Path.Combine(tempDir, "operations") };
             var existingJob = new ProcessingJob { Id = Guid.NewGuid(), ImageAssetId = Guid.NewGuid(), AttemptCount = 1 };
             var existingAttempt = new RestorationAttempt
             {

@@ -117,14 +117,27 @@ public sealed class CorrectiveRestorationPromptCompilerTests
     [Fact]
     public void DisabledBudgetDoesNotBlockProvider()
     {
+        var now = DateTimeOffset.UtcNow;
+        var existingHistory = Enumerable.Range(0, 500)
+            .Select(index => new ProviderUsageEntry("GPT", now.AddMinutes(-index)))
+            .ToArray();
         var decision = new ProviderUsageBudget().Evaluate(
             "GPT",
-            new ProviderUsageBudgetOptions(),
-            Array.Empty<ProviderUsageEntry>(),
-            DateTimeOffset.UtcNow);
+            new ProviderUsageBudgetOptions
+            {
+                Enabled = false,
+                MaxOperationsPerWindow = 40,
+                WindowDurationMinutes = 180,
+                SafetyReserve = 5,
+                OptionalMaxOperationsPerDay = 120
+            },
+            existingHistory,
+            now);
 
         Assert.True(decision.Allowed);
         Assert.Equal("BudgetDisabled", decision.Reason);
+        Assert.Equal(0, decision.EffectiveBudget);
+        Assert.Null(decision.EffectiveDailyBudget);
     }
 
     [Fact]

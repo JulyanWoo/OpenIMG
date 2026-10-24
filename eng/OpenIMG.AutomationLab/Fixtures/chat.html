@@ -1,0 +1,101 @@
+<!doctype html><html lang="en"><meta charset="utf-8">
+<style>
+body{font:16px Segoe UI;margin:20px;background:#101722;color:#eff3fa}
+button,textarea{font:inherit;padding:12px;margin:6px}img{width:220px;height:170px}
+[role=dialog]{position:fixed;inset:0;background:#172030;padding:30px;z-index:20}
+[role=dialog] img{width:360px;height:280px;display:block}
+#composer{display:block;width:650px;height:70px}#upload{display:block}
+</style>
+<h1>OpenIMG offline provider fixture</h1>
+<button aria-label="New chat" data-testid="new-chat-button" onclick="resetChat()">New chat</button>
+<main id="turns"></main>
+<form onsubmit="return false">
+<button type="button" aria-label="Add photos and files" onclick="openAttachment()">Attach</button>
+<label>Attach image<input id="upload" aria-label="Attach image" type="file" accept="image/*" onchange="attach()"></label>
+<div id="attachments"></div>
+<div id="composer" role="textbox" aria-label="Message ChatGPT" contenteditable="true" data-testid="textbox"></div>
+<button type="button" aria-label="Send prompt" data-testid="send-button" onclick="send()">Send</button>
+</form>
+<script>
+const mode=__SCENARIO__;
+const imageBytes='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aNp0AAAAASUVORK5CYII=';
+if(mode==='attachment-no-chooser')document.querySelector('#upload').remove();
+function openAttachment(){
+  if(mode==='attachment-no-chooser'){
+    const menu=document.createElement('div');menu.setAttribute('role','menu');
+    const choice=document.createElement('button');choice.setAttribute('role','menuitem');choice.textContent='Upload from computer';
+    choice.onclick=()=>{menu.remove();const input=document.createElement('input');input.type='file';input.accept='image/*';input.setAttribute('aria-label','Attach image');input.style.display='none';input.onchange=attach;document.querySelector('form').append(input);};
+    menu.append(choice);document.body.append(menu);return;
+  }
+  document.querySelector('#upload').click();
+}
+if(mode==='sign-in-with-visible-composer'){const signIn=document.createElement('button');signIn.textContent='Iniciar sesión';document.body.prepend(signIn);}
+function resetChat(){sessionStorage.clear();history.replaceState(null,'','/');document.querySelector('#turns').replaceChildren();document.querySelector('#viewer')?.remove();}
+function attach(){document.querySelector('#attachments').innerHTML='<span data-testid="attachment">source.png</span>';}
+function send(){
+  if(sessionStorage.prompt)throw Error('duplicate send');
+  sessionStorage.prompt=document.querySelector('#composer').innerText;
+  sessionStorage.sends=String(Number(sessionStorage.sends||0)+1);
+  if(mode==='provisional-route'||mode==='provisional-route-encoded'){
+    document.querySelector('#composer').replaceChildren();document.querySelector('#attachments').replaceChildren();
+    history.replaceState(null,'','/c/local-chatgpt'+(mode==='provisional-route-encoded'?'%3A':':')+'fixture');
+    const stop=document.createElement('button');stop.id='stop';stop.setAttribute('data-testid','stop-button');document.body.append(stop);
+    setTimeout(()=>history.replaceState(null,'','/c/operation'),350);
+    setTimeout(()=>{stop.remove();setTimeout(render,800);},1800);
+    return;
+  }
+  if(mode==='thinking-zero'||mode==='thinking-long'||mode==='thinking-stabilization'||mode==='route-only'){
+    const delayedRoute=mode==='thinking-zero';
+    if(!delayedRoute)history.replaceState(null,'','/c/operation');
+    else setTimeout(()=>history.replaceState(null,'','/c/operation'),700);
+    if(mode!=='thinking-zero')document.querySelector('#composer').replaceChildren();
+    document.querySelector('#attachments').replaceChildren();
+    if(mode==='route-only'){setTimeout(render,4500);return;}
+    const active=document.createElement(mode==='thinking-zero'?'span':'button');active.id='stop';
+    if(mode==='thinking-zero')active.textContent='Thinking';
+    else active.setAttribute('data-testid','stop-button');
+    document.body.append(active);
+    setTimeout(()=>{active.remove();setTimeout(render,800);},mode==='thinking-long'?24000:mode==='thinking-zero'?5000:1600);
+    return;
+  }
+  document.querySelector('#composer').replaceChildren();document.querySelector('#attachments').replaceChildren();
+  history.replaceState(null,'','/c/operation');
+  const stop=document.createElement('button');stop.id='stop';stop.setAttribute('aria-label','Stop generating');stop.textContent='Stop generating';document.body.append(stop);
+  setTimeout(()=>{stop.remove();render();},120);
+}
+function render(){
+  const turns=document.querySelector('#turns');turns.replaceChildren();
+  if(mode==='home-redirect'){history.replaceState(null,'','/');return;}
+  if(['warning','rate-limit','network'].includes(mode)){
+    const alert=document.createElement('div');alert.setAttribute('role','alert');alert.textContent=mode==='rate-limit'?'Rate limit reached':mode==='network'?'Service unavailable':'Provider warning';turns.append(alert);return;
+  }
+  const user=document.createElement('div');user.setAttribute('data-message-author-role','user');user.textContent=mode==='wrong-prompt'?'Different prompt':sessionStorage.prompt;turns.append(user);
+  const article=document.createElement('article');turns.append(article);
+  let imageScope=article;
+  if(mode!=='gallery'){const assistant=document.createElement('div');assistant.setAttribute('data-message-author-role','assistant');assistant.textContent='Generated image';article.append(assistant);imageScope=assistant;}
+  for(let i=0;i<(mode==='two-options'?2:1);i++){
+    const gallery=document.createElement('div');gallery.setAttribute('data-testid','generated-image-gallery');
+    const button=document.createElement('button');button.setAttribute('aria-label','Imagen generada '+(i+1));
+    const img=document.createElement('img');img.src='/candidate-'+i+'.svg';img.alt='Generated image '+(i+1);button.append(img);button.onclick=()=>openViewer(img);gallery.append(button);imageScope.append(gallery);
+  }
+  if(mode==='wrong-conversation')history.replaceState(null,'','/c/unrelated');
+}
+function openViewer(img){
+  sessionStorage.opens=String(Number(sessionStorage.opens||0)+1);
+  document.querySelector('#viewer')?.remove();
+  const dialog=document.createElement('section');dialog.id='viewer';dialog.setAttribute('role','dialog');dialog.setAttribute('aria-label','Generated image viewer');
+  const copy=img.cloneNode();dialog.append(copy);
+  const download=document.createElement('button');download.setAttribute('aria-label','Download image');download.textContent='Download';
+  download.onclick=()=>{
+    sessionStorage.downloadClicks=String(Number(sessionStorage.downloadClicks||0)+1);
+    const a=document.createElement('a');a.download='result.png';
+    a.href=URL.createObjectURL(new Blob([Uint8Array.from(atob(imageBytes),c=>c.charCodeAt(0))],{type:'image/png'}));a.click();
+  };dialog.append(download);document.body.append(dialog);
+  if(mode==='viewer-unmount'||mode==='viewer-route'){
+    document.querySelectorAll('[data-testid="generated-image-gallery"]').forEach(g=>document.querySelector('#turns').append(g));
+    document.querySelectorAll('[data-message-author-role]').forEach(e=>e.remove());
+  }
+  if(mode==='viewer-route')history.replaceState(null,'','/images/operation');
+}
+if(sessionStorage.prompt)render();
+</script></html>
