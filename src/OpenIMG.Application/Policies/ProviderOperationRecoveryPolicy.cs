@@ -12,5 +12,8 @@ public static class ProviderOperationRecoveryPolicy
         state is ProviderOperationState.GenerationMayExist or
             ProviderOperationState.GenerationSubmitted or
             ProviderOperationState.CandidateDownloaded or
-            ProviderOperationState.NeedsRecovery;
+            ProviderOperationState.NeedsRecovery or ProviderOperationState.ConversationBound or
+            ProviderOperationState.Generating or ProviderOperationState.CandidateDetected or
+            ProviderOperationState.CandidateOwned or ProviderOperationState.ViewerOpened or
+            ProviderOperationState.DownloadStarted or ProviderOperationState.FileVerified;
 }

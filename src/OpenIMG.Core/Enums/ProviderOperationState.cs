@@ -23,5 +23,15 @@ public enum ProviderOperationState
     GenerationSubmitted = 13,
     CandidateDownloaded = 14,
     ValidationPending = 15,
-    NeedsRecovery = 16
+    NeedsRecovery = 16,
+    Ready = 17,
+    AttachmentsUploaded = 18,
+    PromptVerified = 19,
+    ConversationBound = 20,
+    Generating = 21,
+    CandidateDetected = 22,
+    CandidateOwned = 23,
+    ViewerOpened = 24,
+    DownloadStarted = 25,
+    FileVerified = 26
 }

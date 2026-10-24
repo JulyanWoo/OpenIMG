@@ -44,6 +44,7 @@ public class GenerationOwnershipContext
     public string? ProviderReadinessFailureStage { get; set; }
     public string? ProviderFailureStage { get; set; }
     public ProviderOperationState OperationState { get; set; } = ProviderOperationState.GenerationPrepared;
+    public GeneratedCandidateEvidence? CandidateEvidence { get; set; }
 
     [JsonIgnore]
     public Func<ProviderOperationState, CancellationToken, Task>? PersistOperationStateAsync { get; set; }

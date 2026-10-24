@@ -6,6 +6,7 @@ namespace OpenIMG.Application.Abstractions.AI;
 /// </summary>
 public interface IGptWebClient
 {
+    Task BindOperationAsync(OpenIMG.Application.Restoration.GptOperationLifecycle lifecycle, bool traceEnabled = false, CancellationToken cancellationToken = default) => Task.CompletedTask;
     /// <summary>
     /// Runs the provider's bounded, evidence-producing readiness gate before
     /// any operation is allowed to inspect or upload attachments.
@@ -30,6 +31,9 @@ public interface IGptWebClient
     Task<bool> SendPromptAsync(string prompt, CancellationToken cancellationToken = default);
     Task<bool> WaitForGeneratedImageAsync(int baselineResponseCount, int baselineImageCount, TimeSpan timeout, CancellationToken cancellationToken = default);
     Task<string?> DownloadLatestGeneratedImageAsync(string operationId, string destinationPath, TimeSpan timeout, CancellationToken cancellationToken = default);
+    Task<string?> RecoverGeneratedImageAsync(string conversationPath, int baselineResponseCount, string prompt,
+        string operationId, string destinationPath, TimeSpan timeout, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("This GPT client does not support owned download recovery.");
     Task<string> GetOperationDiagnosticsJsonAsync(CancellationToken cancellationToken = default);
     Task<IDisposable> AcquireBrowserLockAsync(CancellationToken cancellationToken = default);
 }
@@ -159,6 +163,7 @@ public sealed record GptSubmissionStateResult
     public bool ComposerEmpty { get; init; }
     public int ComposerAttachmentCount { get; init; }
     public bool StopControlDetected { get; init; }
+    public bool GenerationActive { get; init; }
     public bool SendButtonDisabled { get; init; }
     public string? Diagnostics { get; init; }
 
