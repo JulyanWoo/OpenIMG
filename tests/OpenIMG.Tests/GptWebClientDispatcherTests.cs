@@ -29,7 +29,7 @@ public sealed class GptWebClientDispatcherTests
     {
         var method = typeof(GptWebClient).GetMethod("ExecuteAsync", BindingFlags.Instance | BindingFlags.NonPublic)
             ?? throw new MissingMethodException(typeof(GptWebClient).FullName, "ExecuteAsync");
-        return (Task<string>)(method.Invoke(client, [script])
+        return (Task<string>)(method.Invoke(client, [script, CancellationToken.None])
             ?? throw new InvalidOperationException("GPT script execution returned no task."));
     }
 

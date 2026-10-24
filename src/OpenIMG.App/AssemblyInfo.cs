@@ -1,4 +1,8 @@
 using System.Windows;
+using System.Runtime.CompilerServices;
+
+[assembly: InternalsVisibleTo("OpenIMG.Tests")]
+[assembly: InternalsVisibleTo("OpenIMG.AutomationCandidates")]
 
 [assembly:ThemeInfo(
     ResourceDictionaryLocation.None,            //where theme specific resource dictionaries are located

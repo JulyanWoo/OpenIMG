@@ -13,10 +13,13 @@ public class OpenImgOptions
     public string WebView2ProfilePath { get; set; } = string.Empty;
     public string GptWebView2ProfilePath { get; set; } = string.Empty;
     public string DefaultOutputDirectory { get; set; } = string.Empty;
+    public bool AutomaticResultCopyEnabled { get; set; }
+    public string AutomaticResultCopyDirectory { get; set; } = string.Empty;
     public string LogsDirectory { get; set; } = string.Empty;
     public string SettingsPath { get; set; } = string.Empty;
     public string OperationsDirectory { get; set; } = string.Empty;
     public bool EnableCalibrationFeatures { get; set; } = false;
+    public bool ProviderTraceEnabled { get; set; } = false;
 
     public const string DefaultAnalysisPromptVersion = "analysis-v4";
     public const string DefaultRestorationPromptVersion = "restoration-v4";
@@ -71,6 +74,7 @@ public class OpenImgOptions
     // Browser automation timeouts (in seconds)
     public int PageLoadTimeoutSeconds { get; set; } = 45;
     public int ResponseTimeoutSeconds { get; set; } = 120;
+    public int GptGenerationTimeoutSeconds { get; set; } = 600;
     public int SubmissionAcknowledgementTimeoutSeconds { get; set; } = 15;
     public int DownloadTimeoutSeconds { get; set; } = 60;
 

@@ -9,6 +9,7 @@ using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
 using OpenIMG.Application.Abstractions.AI;
 using OpenIMG.Application.Restoration;
+using OpenIMG.App.Helpers;
 
 namespace OpenIMG.App.Browser;
 
@@ -16,7 +17,7 @@ namespace OpenIMG.App.Browser;
 /// ChatGPT WebView2 client hosted by OpenIMG. It exposes attachment/download
 /// evidence and refuses to continue when the DOM contract is not satisfied.
 /// </summary>
-public sealed class GptWebClient : IGptWebClient
+public sealed partial class GptWebClient : IGptWebClient
 {
     private static readonly SemaphoreSlim BrowserSemaphore = new(1, 1);
     private readonly ILogger<GptWebClient> _logger;
@@ -25,10 +26,12 @@ public sealed class GptWebClient : IGptWebClient
     private string? _activeOperationId;
     private string? _pendingDownloadPath;
     private TaskCompletionSource<string?>? _downloadTcs;
+    private readonly GptOperationDiagnostics _diagnostics = new();
     private GptWebReadinessResult? _lastReadiness;
     private bool _navigationHandlerAttached;
     private DateTimeOffset? _lastNavigationCompletedAt;
     private bool? _lastNavigationSucceeded;
+    public event Action<string>? ResultStageChanged;
 
     public GptWebClient(ILogger<GptWebClient> logger) => _logger = logger;
 
@@ -46,6 +49,9 @@ public sealed class GptWebClient : IGptWebClient
 
     public void DetachAndCancel()
     {
+        _automationSession = null;
+        if (_operationLifecycle is not null) _operationLifecycle.StatePersisted -= OnOperationStatePersisted;
+        _operationLifecycle = null;
         _downloadTcs?.TrySetCanceled();
         _pendingDownloadPath = null;
         _activeOperationId = null;
@@ -247,13 +253,8 @@ public sealed class GptWebClient : IGptWebClient
         while (DateTimeOffset.UtcNow < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            snapshot = DecodeJavaScriptString(await ExecuteAsync(@"JSON.stringify((function(){
-              var buttons=Array.from(document.querySelectorAll('button,a')).map(function(b){return {tag:b.tagName,aria:b.getAttribute('aria-label')||'',title:b.getAttribute('title')||'',text:(b.innerText||'').trim().slice(0,60)};}).filter(function(b){return b.aria||b.title||b.text;});
-              var downloads=buttons.filter(function(b){return /download|descargar/i.test(b.aria+' '+b.title+' '+b.text);});
-              return {path:location.pathname,dialogCount:document.querySelectorAll('[role=dialog]').length,buttons:buttons.slice(-35),downloadControls:downloads,images:document.querySelectorAll('img').length};
-            })())"));
-            using var document = JsonDocument.Parse(snapshot);
-            if (document.RootElement.GetProperty("downloadControls").GetArrayLength() > 0) break;
+            snapshot = DecodeJavaScriptString(await ExecuteAsync(GptDomAdapter.DownloadControlSnapshotScript));
+            if (GptDownloadControlPolicy.SelectSnapshot(snapshot) is not null) break;
             await Task.Delay(200, cancellationToken);
         }
         await using (var stream = File.Create(screenshotPath))
@@ -276,28 +277,23 @@ public sealed class GptWebClient : IGptWebClient
         var viewerSnapshotPath = Path.Combine(Path.GetDirectoryName(absoluteDestinationPath)!, "recovery_viewer.png");
         using var browserLock = await AcquireBrowserLockAsync(cancellationToken);
         var viewer = await InspectExistingGeneratedImageViewerAsync(conversationPath, viewerSnapshotPath, cancellationToken);
-        using (var document = JsonDocument.Parse(viewer))
-        {
-            if (document.RootElement.GetProperty("downloadControls").GetArrayLength() != 1)
-                throw new InvalidOperationException("Existing generated image viewer did not expose exactly one download control.");
-        }
+        if (GptDownloadControlPolicy.SelectSnapshot(viewer) is null)
+            throw new InvalidOperationException("Existing generated image viewer did not expose one unambiguous visible download control.");
         _activeOperationId = operationId;
         _pendingDownloadPath = absoluteDestinationPath;
         _downloadTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
         try
         {
-            var targetJson = DecodeJavaScriptString(await ExecuteAsync(@"JSON.stringify((function(){var b=document.querySelector('button[aria-label=""Descargar""]');if(!b)return null;var r=b.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})())"));
-            using var targetDocument = JsonDocument.Parse(targetJson);
-            if (targetDocument.RootElement.ValueKind != JsonValueKind.Object)
-                throw new InvalidOperationException("Existing image download button was not found.");
-            var x = targetDocument.RootElement.GetProperty("x").GetDouble();
-            var y = targetDocument.RootElement.GetProperty("y").GetDouble();
+            var downloadControl = await FindVisibleDownloadControlAsync(cancellationToken)
+                ?? throw new InvalidOperationException("The active generated-image viewer no longer has one unambiguous visible download control.");
             var core = _webView!.CoreWebView2!;
-            await core.CallDevToolsProtocolMethodAsync("Input.dispatchMouseEvent", JsonSerializer.Serialize(new { type = "mousePressed", x, y, button = "left", clickCount = 1 }));
-            await core.CallDevToolsProtocolMethodAsync("Input.dispatchMouseEvent", JsonSerializer.Serialize(new { type = "mouseReleased", x, y, button = "left", clickCount = 1 }));
+            await ClickDownloadControlAsync(core, downloadControl, cancellationToken);
             var completed = await Task.WhenAny(_downloadTcs.Task, Task.Delay(TimeSpan.FromSeconds(45), cancellationToken));
             if (completed != _downloadTcs.Task)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
                 throw new TimeoutException("Owned download did not complete within the bounded recovery window.");
+            }
             var downloaded = await _downloadTcs.Task;
             if (!string.Equals(downloaded, absoluteDestinationPath, StringComparison.OrdinalIgnoreCase) || !File.Exists(absoluteDestinationPath))
                 throw new InvalidOperationException("Owned download was not saved at the scoped operation path.");
@@ -313,6 +309,8 @@ public sealed class GptWebClient : IGptWebClient
 
     public async Task<bool> StartNewChatAsync(CancellationToken cancellationToken = default)
     {
+        _diagnostics.Reset("StartingConversation");
+        _automationSession = null;
         await InjectAsync();
         var result = await ExecuteAsync("(function(){var b=window.__openimg_gpt.findNewChatButton(); if(!b) return false; b.click(); return true;})();");
         if (!IsTrue(result))
@@ -430,6 +428,7 @@ public sealed class GptWebClient : IGptWebClient
         int expectedInitialCount,
         CancellationToken cancellationToken)
     {
+        _diagnostics.Stage("UploadingAttachment");
         var result = new GptAttachmentUploadSpikeResult
         {
             TestFilePath = imagePath,
@@ -554,6 +553,7 @@ public sealed class GptWebClient : IGptWebClient
                 FileInputsAfter = afterButtonClick.Inputs
             };
 
+            var uploadChoiceClicked = false;
             if (!fileChooserOpened.Task.IsCompleted && afterButtonClick.MenuItems.Count > 0)
             {
                 var uploadChoice = afterButtonClick.MenuItems
@@ -572,35 +572,86 @@ public sealed class GptWebClient : IGptWebClient
                         type = "mouseReleased", x = uploadChoice.X + uploadChoice.Width / 2,
                         y = uploadChoice.Y + uploadChoice.Height / 2, button = "left", clickCount = 1
                     }));
+                    uploadChoiceClicked = true;
                 }
             }
 
-            string chooserEvent;
+            long backendNodeId;
+            string? frameId;
+            string? mode;
             try
             {
-                chooserEvent = await fileChooserOpened.Task.WaitAsync(TimeSpan.FromSeconds(8), cancellationToken);
+                var chooserEvent = await fileChooserOpened.Task.WaitAsync(TimeSpan.FromSeconds(8), cancellationToken);
+                using var chooserDocument = JsonDocument.Parse(chooserEvent);
+                var chooserRoot = chooserDocument.RootElement;
+                backendNodeId = chooserRoot.TryGetProperty("backendNodeId", out var backendNodeElement) ? backendNodeElement.GetInt64() : 0;
+                frameId = chooserRoot.TryGetProperty("frameId", out var frameIdElement) ? frameIdElement.GetString() : null;
+                mode = chooserRoot.TryGetProperty("mode", out var modeElement) ? modeElement.GetString() : null;
             }
             catch (TimeoutException)
             {
                 var finalSnapshot = await ReadAttachmentUiSnapshotAsync(cancellationToken);
-                return result with
+                var fallbackInput = SelectUniqueFallbackFileInput(finalSnapshot.Inputs);
+                var inputAppearedAfterAction = finalSnapshot.Inputs.Count > before.Inputs.Count;
+                if ((!uploadChoiceClicked && !inputAppearedAfterAction) || fallbackInput is null)
                 {
-                    AttachmentUiActivated = result.AttachmentUiActivated || finalSnapshot.MenuItems.Count > 0,
+                    return result with
+                    {
+                        AttachmentUiActivated = result.AttachmentUiActivated || finalSnapshot.MenuItems.Count > 0,
+                        FileInputCountAfter = finalSnapshot.Inputs.Count,
+                        FileInputsAfter = finalSnapshot.Inputs,
+                        FailureStage = "AttachmentUi",
+                        FailureReason = fallbackInput is null
+                            ? "The upload menu opened, but no unique connected, enabled image input could be identified safely."
+                            : "The upload action was not confirmed; OpenIMG did not assign a file to the page."
+                    };
+                }
+
+                // WebView2 may omit Page.fileChooserOpened for a page-owned
+                // upload input. Only continue after the actual upload menu was
+                // clicked (or a new live input appeared), and only when one
+                // unambiguous connected input remains. The normal preview check
+                // below is still required before this upload is accepted.
+                try
+                {
+                    backendNodeId = await ResolveFileInputBackendNodeIdAsync(core, fallbackInput, cancellationToken);
+                }
+                catch (Exception ex) when (ex is InvalidOperationException or JsonException)
+                {
+                    return result with
+                    {
+                        AttachmentUiActivated = true,
+                        FileInputCountAfter = finalSnapshot.Inputs.Count,
+                        FileInputsAfter = finalSnapshot.Inputs,
+                        SelectedInputIndex = fallbackInput.Index,
+                        SelectedInputAccept = fallbackInput.Accept,
+                        SelectedInputMultiple = fallbackInput.Multiple,
+                        SelectedInputFrame = fallbackInput.OwnerFrame,
+                        FailureStage = "InputIdentification",
+                        FailureReason = "The unique live upload input changed before it could be verified."
+                    };
+                }
+
+                frameId = fallbackInput.OwnerFrame;
+                mode = "unique-live-input-fallback";
+                result = result with
+                {
+                    AttachmentUiActivated = true,
                     FileInputCountAfter = finalSnapshot.Inputs.Count,
                     FileInputsAfter = finalSnapshot.Inputs,
-                    FailureStage = "AttachmentUi",
-                    FailureReason = "ChatGPT attachment control opened, but no live file chooser event identified an upload input."
+                    SelectedInputIndex = fallbackInput.Index,
+                    SelectedInputAccept = fallbackInput.Accept,
+                    SelectedInputMultiple = fallbackInput.Multiple,
+                    SelectedInputFrame = fallbackInput.OwnerFrame,
+                    NodeIdentifierType = "backendNodeId (unique live input fallback)",
+                    NodeIdentifierValue = backendNodeId.ToString()
                 };
+                _logger.LogInformation("GPT upload used the unique image-input fallback after its chooser event timed out.");
             }
 
             result = result with { AttachmentUiActivated = true };
-            using var chooserDocument = JsonDocument.Parse(chooserEvent);
-            var chooserRoot = chooserDocument.RootElement;
-            var backendNodeId = chooserRoot.TryGetProperty("backendNodeId", out var backendNodeElement) ? backendNodeElement.GetInt64() : 0;
-            var frameId = chooserRoot.TryGetProperty("frameId", out var frameIdElement) ? frameIdElement.GetString() : null;
-            var mode = chooserRoot.TryGetProperty("mode", out var modeElement) ? modeElement.GetString() : null;
             if (backendNodeId <= 0)
-                return result with { FailureStage = "InputIdentification", FailureReason = $"File chooser event lacked a valid backendNodeId. Event={chooserEvent}" };
+                return result with { FailureStage = "InputIdentification", FailureReason = "The verified upload control did not resolve to a live browser input." };
 
             var descriptorJson = await core.CallDevToolsProtocolMethodAsync(
                 "DOM.describeNode", JsonSerializer.Serialize(new { backendNodeId, depth = 0, pierce = true }));
@@ -743,12 +794,13 @@ public sealed class GptWebClient : IGptWebClient
         var root = document.RootElement;
         return new GptSubmissionStateResult
         {
-            ConversationPath = GetString(root, "conversationPath"),
+            ConversationPath = GetString(root, "conversationPath") == "/" ? "/" : GenerationRecoveryCheckpoint.NormalizeConversationPath(GetString(root, "conversationPath")),
             UserMessageCount = GetInt(root, "userMessageCount"),
             LastUserMessageMatchesPrompt = GetBool(root, "lastUserMessageMatchesPrompt"),
             ComposerEmpty = GetBool(root, "composerEmpty"),
             ComposerAttachmentCount = GetInt(root, "composerAttachmentCount"),
             StopControlDetected = GetBool(root, "stopControlDetected"),
+            GenerationActive = GetBool(root, "generationActive"),
             SendButtonDisabled = GetBool(root, "sendButtonDisabled"),
             Diagnostics = root.TryGetProperty("diagnostics", out var diagnostics) ? diagnostics.GetRawText() : null
         };
@@ -764,15 +816,14 @@ public sealed class GptWebClient : IGptWebClient
     public async Task<bool> SendPromptAsync(string prompt, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
-        await InjectAsync();
-        var encoded = JsonSerializer.Serialize(prompt);
-        var set = await ExecuteAsync($"window.__openimg_gpt.setComposerText({encoded})");
-        if (!IsTrue(set)) return false;
-        var send = await ExecuteAsync("window.__openimg_gpt.clickSend()");
-        return IsTrue(send);
+        var state = await GetSubmissionStateAsync(prompt, cancellationToken);
+        var result = await SubmitPromptOnceAsync(prompt, state.UserMessageCount,
+            _operationLifecycle?.Context.BaselineAssistantResponseCount ?? 0,
+            TimeSpan.FromSeconds(20), cancellationToken);
+        return result.SendClickedExactlyOnce && result.SubmissionAcknowledged;
     }
 
-    public async Task<GptPromptSubmissionResult> SubmitPromptOnceAsync(
+    private async Task<GptPromptSubmissionResult> SubmitPromptOnceCoreAsync(
         string prompt,
         int baselineUserMessageCount,
         int baselineAssistantResponseCount,
@@ -805,11 +856,22 @@ public sealed class GptWebClient : IGptWebClient
             return verificationResult with { FailureStage = "PromptSubmission", FailureReason = "Submission acknowledgement timeout must be positive." };
 
         var beforeClick = await GetSubmissionStateAsync(prompt, cancellationToken);
+        var lifecycle = _operationLifecycle ?? throw new InvalidOperationException("OperationBindingRequired: bind a durable operation before Send.");
+        if (lifecycle.Context.OperationState != OpenIMG.Core.Enums.ProviderOperationState.GenerationMayExist ||
+            lifecycle.Context.PersistOperationStateAsync is null || lifecycle.Context.SendClickedExactlyOnce)
+            throw new InvalidOperationException("Send requires a persisted pre-submission checkpoint and cannot be repeated.");
+        var downloadSession = new GptAutomationSession(lifecycle, prompt, ExecuteForDownloadAsync, WaitForOperationDomChangeAsync);
+        await downloadSession.BeginAsync(false, cancellationToken);
+        _automationSession = downloadSession;
         // Exactly one click. Acknowledgement is about the user's message being
         // accepted; the generation watcher owns assistant/image start and finish.
         if (!IsTrue(await ExecuteAsync("window.__openimg_gpt.clickSend()")))
             return verificationResult with { FailureStage = "PromptSubmission", FailureReason = "GPT send control was unavailable." };
+        lifecycle.Context.SendClickedExactlyOnce = true;
+        lifecycle.Context.PromptSentAt = DateTimeOffset.UtcNow;
+        await lifecycle.AdvanceAsync(OpenIMG.Core.Enums.ProviderOperationState.GenerationMayExist, cancellationToken);
 
+        _diagnostics.Stage("WaitingForSubmissionAcknowledgement");
         var submittedAt = DateTimeOffset.UtcNow;
         var deadline = submittedAt + acknowledgementTimeout;
         GptSubmissionStateResult? lastState = null;
@@ -821,15 +883,18 @@ public sealed class GptWebClient : IGptWebClient
             var clearedUiAck = lastState.ComposerEmpty && lastState.ComposerAttachmentCount == 0 &&
                 (lastState.StopControlDetected || lastState.SendButtonDisabled);
             var newConversationAck = lastState.IndicatesNewConversationSubmissionFrom(beforeClick);
-            if (directUserMessageAck || clearedUiAck || newConversationAck)
+            if (lastState.GenerationActive || directUserMessageAck || clearedUiAck || newConversationAck)
             {
-                var signal = directUserMessageAck
+                var signal = lastState.GenerationActive ? "GenerationActiveAfterSend" : directUserMessageAck
                     ? "UserMessageAppearedAndMatchedPrompt"
                     : newConversationAck
                         ? "NewConversationRouteAndComposerCleared"
                         : lastState.StopControlDetected
                         ? "ComposerAndAttachmentsCleared_StopControlVisible"
                         : "ComposerAndAttachmentsCleared_SendDisabled";
+                lifecycle.Context.SubmissionAcknowledgedAt = DateTimeOffset.UtcNow;
+                await lifecycle.AdvanceAsync(OpenIMG.Core.Enums.ProviderOperationState.GenerationSubmitted, cancellationToken);
+                await downloadSession.AcknowledgeAsync(lastState.ConversationPath, cancellationToken);
                 return verificationResult with
                 {
                     Submitted = true,
@@ -869,6 +934,7 @@ public sealed class GptWebClient : IGptWebClient
         string compiledPrompt,
         CancellationToken cancellationToken = default)
     {
+        _diagnostics.Stage("InsertingAndVerifyingPrompt");
         ArgumentException.ThrowIfNullOrWhiteSpace(compiledPrompt);
         cancellationToken.ThrowIfCancellationRequested();
         await InjectAsync();
@@ -957,67 +1023,6 @@ public sealed class GptWebClient : IGptWebClient
         };
     }
 
-    public async Task<GptCurrentResponseImageResult> WaitForCurrentResponseImageAsync(
-        int baselineResponseCount,
-        TimeSpan timeout,
-        CancellationToken cancellationToken = default)
-    {
-        var startedAt = DateTimeOffset.UtcNow;
-        var deadline = startedAt + timeout;
-        DateTimeOffset? generationStartedAt = null;
-        var stableCompletedSamples = 0;
-        var latestCount = 0;
-        while (DateTimeOffset.UtcNow < deadline)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            await InjectAsync();
-            var raw = await ExecuteAsync($"JSON.stringify(window.__openimg_gpt.currentAssistantImageState({baselineResponseCount}))");
-            using var snapshot = JsonDocument.Parse(DecodeJavaScriptString(raw));
-            var root = snapshot.RootElement;
-            var responseCount = root.TryGetProperty("responseCount", out var responses) ? responses.GetInt32() : 0;
-            latestCount = root.TryGetProperty("currentResponseImageCount", out var imageCount) ? imageCount.GetInt32() : 0;
-            var newResponse = root.TryGetProperty("newResponse", out var hasResponse) && hasResponse.GetBoolean();
-            var ownedImage = root.TryGetProperty("currentResponseOwnedImage", out var hasImage) && hasImage.GetBoolean();
-            var generationActive = root.TryGetProperty("generationActive", out var active) && active.GetBoolean();
-            var rateLimited = root.TryGetProperty("rateLimited", out var limited) && limited.GetBoolean();
-            var generationUnavailable = root.TryGetProperty("generationUnavailable", out var unavailable) && unavailable.GetBoolean();
-            var providerUnavailable = root.TryGetProperty("providerUnavailable", out var providerDown) && providerDown.GetBoolean();
-            if (newResponse && generationStartedAt == null) generationStartedAt = DateTimeOffset.UtcNow;
-            if (rateLimited || generationUnavailable || providerUnavailable)
-                return new GptCurrentResponseImageResult
-                {
-                    GenerationStarted = newResponse, GenerationStartedAt = generationStartedAt,
-                    AssistantResponseCount = responseCount, CurrentResponseImageCount = latestCount,
-                    FailureStage = rateLimited ? "RateLimited" : generationUnavailable ? "GenerationUnavailable" : "ProviderUnavailable",
-                    FailureReason = rateLimited ? "ChatGPT reported a usage limit/rate limit." : generationUnavailable ? "ChatGPT reported image generation unavailable." : "ChatGPT reported temporary service unavailability."
-                };
-            if (ownedImage && !generationActive) stableCompletedSamples++;
-            else stableCompletedSamples = 0;
-
-            // Requiring consecutive observations prevents a transient image or
-            // a still-running response from being labelled complete.
-            if (generationStartedAt.HasValue && ownedImage && stableCompletedSamples >= 2)
-                return new GptCurrentResponseImageResult
-                {
-                    GenerationStarted = true, GenerationCompleted = true, GeneratedImageDetected = true,
-                    CurrentAssistantResponseOwned = true, GenerationStartedAt = generationStartedAt,
-                    GenerationCompletedAt = DateTimeOffset.UtcNow, AssistantResponseCount = responseCount,
-                    CurrentResponseImageCount = latestCount, FailureStage = "Completed"
-                };
-            await Task.Delay(750, cancellationToken);
-        }
-
-        var didStart = generationStartedAt.HasValue;
-        return new GptCurrentResponseImageResult
-        {
-            GenerationStarted = didStart, GenerationCompleted = false,
-            GeneratedImageDetected = latestCount > 0, CurrentAssistantResponseOwned = false,
-            GenerationStartedAt = generationStartedAt, AssistantResponseCount = await GetAssistantResponseCountAsync(cancellationToken),
-            CurrentResponseImageCount = latestCount,
-            FailureStage = didStart ? "Generation" : "GenerationDidNotStart",
-            FailureReason = didStart ? "The current assistant response did not expose a completed owned image before timeout." : "No new assistant response appeared before timeout."
-        };
-    }
 
     public async Task<bool> WaitForGeneratedImageAsync(int baselineResponseCount, int baselineImageCount, TimeSpan timeout, CancellationToken cancellationToken = default)
     {
@@ -1033,61 +1038,37 @@ public sealed class GptWebClient : IGptWebClient
         return false;
     }
 
-    public Task<string?> DownloadLatestGeneratedImageAsync(string operationId, string destinationPath, TimeSpan timeout, CancellationToken cancellationToken = default) =>
-        InvokeOnWebViewDispatcherAsync(
-            () => DownloadLatestGeneratedImageOnUiThreadAsync(operationId, destinationPath, timeout, cancellationToken),
-            cancellationToken);
 
-    private async Task<string?> DownloadLatestGeneratedImageOnUiThreadAsync(string operationId, string destinationPath, TimeSpan timeout, CancellationToken cancellationToken)
+    private async Task<GptDownloadControlCandidate?> FindVisibleDownloadControlAsync(CancellationToken cancellationToken)
     {
-        if (_webView?.CoreWebView2 == null) return null;
-        var absoluteDestinationPath = Path.GetFullPath(destinationPath);
-        if (File.Exists(absoluteDestinationPath))
-            throw new IOException("The operation download destination already exists.");
-        Directory.CreateDirectory(Path.GetDirectoryName(absoluteDestinationPath)!);
-        var conversationPath = DecodeJavaScriptString(await ExecuteAsync("location.pathname"));
-        if (!conversationPath.StartsWith("/c/", StringComparison.Ordinal)) return null;
-        var viewer = await InspectExistingGeneratedImageViewerAsync(
-            conversationPath, Path.Combine(Path.GetDirectoryName(absoluteDestinationPath)!, "download_viewer.png"), cancellationToken);
-        using (var document = JsonDocument.Parse(viewer))
-        {
-            if (document.RootElement.GetProperty("downloadControls").GetArrayLength() != 1)
-                return null;
-        }
-        _activeOperationId = operationId;
-        _pendingDownloadPath = absoluteDestinationPath;
-        _downloadTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        try
-        {
-            var targetJson = DecodeJavaScriptString(await ExecuteAsync(@"JSON.stringify((function(){var b=document.querySelector('button[aria-label=""Descargar""]');if(!b)return null;var r=b.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})())"));
-            using var targetDocument = JsonDocument.Parse(targetJson);
-            if (targetDocument.RootElement.ValueKind != JsonValueKind.Object) return null;
-            var x = targetDocument.RootElement.GetProperty("x").GetDouble();
-            var y = targetDocument.RootElement.GetProperty("y").GetDouble();
-            var core = _webView.CoreWebView2;
-            await core.CallDevToolsProtocolMethodAsync("Input.dispatchMouseEvent", JsonSerializer.Serialize(new { type = "mousePressed", x, y, button = "left", clickCount = 1 }));
-            await core.CallDevToolsProtocolMethodAsync("Input.dispatchMouseEvent", JsonSerializer.Serialize(new { type = "mouseReleased", x, y, button = "left", clickCount = 1 }));
-            var completed = await Task.WhenAny(_downloadTcs.Task, Task.Delay(timeout, cancellationToken));
-            if (completed != _downloadTcs.Task) return null;
-            var path = await _downloadTcs.Task;
-            if (string.IsNullOrWhiteSpace(path) || !string.Equals(path, absoluteDestinationPath, StringComparison.OrdinalIgnoreCase) || !File.Exists(absoluteDestinationPath)) return null;
-            return absoluteDestinationPath;
-        }
-        finally
-        {
-            _pendingDownloadPath = null;
-            _downloadTcs = null;
-            _activeOperationId = null;
-        }
+        var raw = DecodeJavaScriptString(await ExecuteAsync(GptDomAdapter.DownloadControlSnapshotScript));
+        return GptDownloadControlPolicy.SelectSnapshot(raw);
     }
 
-    public async Task<string> GetOperationDiagnosticsJsonAsync(CancellationToken cancellationToken = default)
+    private Task<string> ExecuteForDownloadAsync(string script, CancellationToken cancellationToken)
     {
-        var readiness = _lastReadiness ?? await AssessReadinessAsync(cancellationToken);
-        return JsonSerializer.Serialize(readiness);
+        cancellationToken.ThrowIfCancellationRequested();
+        return ExecuteAsync(script, cancellationToken);
     }
+
+    private static async Task ClickDownloadControlAsync(CoreWebView2 core, GptDownloadControlCandidate control, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(control.ElementToken))
+            throw new InvalidOperationException("The current GPT download control could not be safely re-resolved.");
+        var clicked = await core.ExecuteScriptAsync(GptGeneratedImageDownloadSession.GetClickScript(control.ElementToken)).WaitAsync(TimeSpan.FromSeconds(15), cancellationToken);
+        if (!string.Equals(clicked, "true", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The owned GPT download control changed or became unavailable before it was clicked.");
+    }
+
+
 
     private async Task InjectAsync() => await ExecuteAsync(GptDomAdapter.HelperScript);
+
+    private void ReportResultStage(string stage)
+    {
+        _diagnostics.Stage(stage);
+        ResultStageChanged?.Invoke(stage);
+    }
 
     private async Task<WebViewState> ReadWebViewStateAsync()
     {
@@ -1180,6 +1161,68 @@ public sealed class GptWebClient : IGptWebClient
         var items = values.EnumerateArray().Select(value => value.GetString() ?? "").ToArray();
         for (var i = 0; i + 1 < items.Length; i += 2) attributes[items[i]] = items[i + 1];
         return attributes;
+    }
+
+    private static GptFileInputDiagnostic? SelectUniqueFallbackFileInput(IReadOnlyCollection<GptFileInputDiagnostic> inputs)
+    {
+        var liveInputs = inputs.Where(input => input.Connected && !input.Disabled).ToArray();
+        var imageInputs = liveInputs.Where(input => AcceptsImage(input.Accept)).ToArray();
+        return imageInputs.Length == 1 ? imageInputs[0] : null;
+    }
+
+    private static bool AcceptsImage(string? accept) =>
+        !string.IsNullOrWhiteSpace(accept) && accept.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .Any(value => value.StartsWith("image/", StringComparison.OrdinalIgnoreCase) ||
+                value.Equals(".jpg", StringComparison.OrdinalIgnoreCase) ||
+                value.Equals(".jpeg", StringComparison.OrdinalIgnoreCase) ||
+                value.Equals(".png", StringComparison.OrdinalIgnoreCase) ||
+                value.Equals(".webp", StringComparison.OrdinalIgnoreCase) ||
+                value.Equals(".bmp", StringComparison.OrdinalIgnoreCase) ||
+                value.Equals(".tif", StringComparison.OrdinalIgnoreCase) ||
+                value.Equals(".tiff", StringComparison.OrdinalIgnoreCase));
+
+    private static async Task<long> ResolveFileInputBackendNodeIdAsync(
+        CoreWebView2 core,
+        GptFileInputDiagnostic expectedInput,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var evaluation = await core.CallDevToolsProtocolMethodAsync("Runtime.evaluate", JsonSerializer.Serialize(new
+        {
+            expression = GptDomAdapter.GetFileInputAtScript(expectedInput.Index),
+            returnByValue = false,
+            awaitPromise = false
+        }));
+        using var evaluationDocument = JsonDocument.Parse(evaluation);
+        var evaluationRoot = evaluationDocument.RootElement;
+        if (evaluationRoot.TryGetProperty("exceptionDetails", out _))
+            throw new InvalidOperationException("The current page could not resolve the live file input.");
+        if (!evaluationRoot.TryGetProperty("result", out var remoteObject) ||
+            !remoteObject.TryGetProperty("objectId", out var objectIdElement) ||
+            string.IsNullOrWhiteSpace(objectIdElement.GetString()))
+            throw new InvalidOperationException("The live file input no longer exists.");
+
+        var descriptor = await core.CallDevToolsProtocolMethodAsync("DOM.describeNode", JsonSerializer.Serialize(new
+        {
+            objectId = objectIdElement.GetString(),
+            depth = 0,
+            pierce = true
+        }));
+        using var descriptorDocument = JsonDocument.Parse(descriptor);
+        var node = descriptorDocument.RootElement.GetProperty("node");
+        var nodeName = node.TryGetProperty("nodeName", out var nodeNameElement) ? nodeNameElement.GetString() : null;
+        var attributes = ReadAttributes(node);
+        var type = attributes.TryGetValue("type", out var typeValue) ? typeValue : null;
+        var accept = attributes.TryGetValue("accept", out var acceptValue) ? acceptValue : null;
+        if (!string.Equals(nodeName, "INPUT", StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(type, "file", StringComparison.OrdinalIgnoreCase) ||
+            attributes.ContainsKey("disabled") ||
+            !string.Equals(accept, expectedInput.Accept, StringComparison.OrdinalIgnoreCase) ||
+            !node.TryGetProperty("backendNodeId", out var backendNodeIdElement) ||
+            !backendNodeIdElement.TryGetInt64(out var backendNodeId) || backendNodeId <= 0)
+            throw new InvalidOperationException("The current DOM node does not match the unique enabled file input observed in the page.");
+
+        return backendNodeId;
     }
 
     private static int ScoreAttachmentButton(GptAttachmentButtonDiagnostic button)
@@ -1350,15 +1393,15 @@ public sealed class GptWebClient : IGptWebClient
     private static bool IsChatGptUrl(string? url) =>
         GptWebNavigationPolicy.IsChatGptUrl(url);
 
-    private async Task<string> ExecuteAsync(string script)
+    private async Task<string> ExecuteAsync(string script, CancellationToken cancellationToken = default)
     {
         return await InvokeOnWebViewDispatcherAsync(async () =>
         {
             var core = _webView?.CoreWebView2;
             if (core == null)
                 throw new InvalidOperationException("GPT WebView2 is not initialized.");
-            return await core.ExecuteScriptAsync(script);
-        });
+            return await core.ExecuteScriptAsync(script).WaitAsync(TimeSpan.FromSeconds(15), cancellationToken);
+        }, cancellationToken).WaitAsync(TimeSpan.FromSeconds(15), cancellationToken);
     }
 
     private async Task<TResult> InvokeOnWebViewDispatcherAsync<TResult>(
@@ -1389,6 +1432,8 @@ public sealed class GptWebClient : IGptWebClient
     {
         if (_navigationHandlerAttached) return;
         core.DownloadStarting += OnDownloadStarting;
+        core.WebMessageReceived += OnOperationDomMessage;
+        core.SourceChanged += OnOperationSourceChanged;
         core.NavigationCompleted += OnNavigationCompleted;
         _navigationHandlerAttached = true;
     }
@@ -1397,6 +1442,8 @@ public sealed class GptWebClient : IGptWebClient
     {
         if (!_navigationHandlerAttached || _webView?.CoreWebView2 == null) return;
         _webView.CoreWebView2.DownloadStarting -= OnDownloadStarting;
+        _webView.CoreWebView2.WebMessageReceived -= OnOperationDomMessage;
+        _webView.CoreWebView2.SourceChanged -= OnOperationSourceChanged;
         _webView.CoreWebView2.NavigationCompleted -= OnNavigationCompleted;
         _navigationHandlerAttached = false;
     }
@@ -1414,21 +1461,45 @@ public sealed class GptWebClient : IGptWebClient
 
     private void OnDownloadStarting(object? sender, CoreWebView2DownloadStartingEventArgs args)
     {
-        if (string.IsNullOrWhiteSpace(_pendingDownloadPath))
+        var path = _pendingDownloadPath;
+        var tcs = _downloadTcs;
+        var operationId = _activeOperationId;
+        if (string.IsNullOrWhiteSpace(path) || string.IsNullOrWhiteSpace(operationId) || tcs is null)
         {
             args.Cancel = true;
             args.Handled = true;
             return;
         }
-        var path = _pendingDownloadPath;
-        var tcs = _downloadTcs;
         args.ResultFilePath = path;
         args.Handled = true;
-        args.DownloadOperation.StateChanged += (_, _) =>
+        var download = args.DownloadOperation;
+        if (Interlocked.Increment(ref _nativeDownloadSeen) != 1)
         {
-            if (args.DownloadOperation.State == CoreWebView2DownloadState.Completed) tcs?.TrySetResult(path);
-            if (args.DownloadOperation.State == CoreWebView2DownloadState.Interrupted) tcs?.TrySetResult(null);
+            args.Cancel = true;
+            tcs.TrySetException(new IOException("An additional native download was rejected for this operation."));
+            return;
+        }
+        _diagnostics.NativeDownload(download.State.ToString());
+        _logger.LogInformation("[{OperationId}] Native GPT download started.", operationId);
+        download.StateChanged += (_, _) =>
+        {
+            if (ReferenceEquals(_downloadTcs, tcs))
+                _diagnostics.NativeDownload(download.State == CoreWebView2DownloadState.Interrupted ? "Interrupted/" + download.InterruptReason : download.State.ToString());
+            _logger.LogInformation("[{OperationId}] Native GPT download state {State}; reason {Reason}.", operationId, download.State, download.InterruptReason);
+            CompleteDownloadTask(download, path, tcs);
         };
+        CompleteDownloadTask(download, path, tcs);
+    }
+
+    private static void CompleteDownloadTask(
+        CoreWebView2DownloadOperation download,
+        string destinationPath,
+        TaskCompletionSource<string?> completion)
+    {
+        if (download.State == CoreWebView2DownloadState.Completed)
+            completion.TrySetResult(destinationPath);
+        else if (download.State == CoreWebView2DownloadState.Interrupted)
+            completion.TrySetException(new IOException("WebView2 interrupted the operation-owned image download: " + download.InterruptReason));
     }
 
     private static bool IsTrue(string raw) => string.Equals(raw.Trim(), "true", StringComparison.OrdinalIgnoreCase);

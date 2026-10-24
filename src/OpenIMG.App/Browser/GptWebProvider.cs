@@ -5,6 +5,7 @@ using OpenIMG.Application.Abstractions.Persistence;
 using OpenIMG.Application.Configuration;
 using OpenIMG.Core.Enums;
 using OpenIMG.Core.Models;
+using OpenIMG.Application.Restoration;
 using Microsoft.Extensions.Logging;
 
 namespace OpenIMG.App.Browser;
@@ -94,7 +95,7 @@ public sealed class GptWebProvider : IImageGenerationProvider, ICorrectiveImageG
         ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
         ArgumentException.ThrowIfNullOrWhiteSpace(tempDownloadDirectory);
         ArgumentNullException.ThrowIfNull(context);
-        if (string.IsNullOrWhiteSpace(context.GenerationOperationId))
+        if (!OpenIMG.Application.Restoration.GenerationRecoveryCheckpoint.IsOperationId(context.GenerationOperationId))
             throw new ArgumentException("A unique generation operation ID is required.", nameof(context));
 
         var sourcePath = Path.GetFullPath(imagePaths[0]);
@@ -104,7 +105,21 @@ public sealed class GptWebProvider : IImageGenerationProvider, ICorrectiveImageG
         context.ExpectedSecondarySourcePath = secondaryPath;
         context.ExpectedAttachmentCount = imagePaths.Count;
 
+        var sourceHash = await ComputeSha256Async(sourcePath, cancellationToken);
+        if (!string.IsNullOrEmpty(context.ExpectedSourceSha256) && !string.Equals(context.ExpectedSourceSha256, sourceHash, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("The submitted source hash does not match the verified original.");
+        context.ExpectedSourceSha256 = sourceHash;
+        var lifecycle = new GptOperationLifecycle(context, prompt);
+        await ReportStageAsync(lifecycle, "BrowserLock", cancellationToken);
         using var browserLock = await _client.AcquireBrowserLockAsync(cancellationToken);
+        await _client.BindOperationAsync(lifecycle, _options.ProviderTraceEnabled, cancellationToken);
+        if (context.OperationState == ProviderOperationState.NeedsRecovery)
+        {
+            if (!OpenIMG.Application.Restoration.GenerationRecoveryCheckpoint.IsConversationPath(context.ConversationPathAfterSubmit))
+                throw new InvalidOperationException("The GPT operation has no verified conversation checkpoint for recovery.");
+            return await DownloadAndVerifyAsync(imagePaths, prompt, tempDownloadDirectory, lifecycle, true, cancellationToken);
+        }
+        await ReportStageAsync(lifecycle, "Readiness", cancellationToken);
         var readiness = await _client.AssessReadinessAsync(cancellationToken);
         if (!readiness.IsReady)
         {
@@ -112,12 +127,20 @@ public sealed class GptWebProvider : IImageGenerationProvider, ICorrectiveImageG
             throw new InvalidOperationException($"GPT readiness failed at {readiness.FailureStage}: {readiness.FailureReason ?? "unknown reason"}.");
         }
         context.ProviderReadinessConfirmed = true;
+        await lifecycle.AdvanceAsync(ProviderOperationState.Ready, cancellationToken);
 
+        await ReportStageAsync(lifecycle, "ConversationStart", cancellationToken);
         if (!await _client.StartNewChatAsync(cancellationToken))
+        {
+            context.ProviderFailureStage = "ConversationStart";
             throw new InvalidOperationException("GPT clean conversation could not be established.");
+        }
         context.AttachmentCountBeforeUpload = await _client.GetAttachmentCountAsync(cancellationToken);
         if (context.AttachmentCountBeforeUpload != 0)
+        {
+            context.ProviderFailureStage = "PreUpload";
             throw new InvalidOperationException("GPT clean conversation contained stale attachments.");
+        }
         context.FreshChatConfirmed = true;
 
         var baselineResponses = await _client.GetAssistantResponseCountAsync(cancellationToken);
@@ -128,12 +151,16 @@ public sealed class GptWebProvider : IImageGenerationProvider, ICorrectiveImageG
         context.BaselineUserMessageCount = baselineUserMessages;
         context.BaselineAssistantResponseCount = baselineResponses;
 
+        await ReportStageAsync(lifecycle, "AttachmentUpload", cancellationToken);
         if (imagePaths.Count == 1)
         {
             var upload = await _client.UploadSingleImageAsync(sourcePath, cancellationToken);
             context.AttachmentCountAfterUpload = upload.ObservedAttachmentCount ?? 0;
             if (!upload.ReadinessPassed || !upload.AttachmentReady || upload.ObservedAttachmentCount != 1)
+            {
+                context.ProviderFailureStage = upload.FailureStage;
                 throw new InvalidOperationException($"GPT source upload failed at {upload.FailureStage}: {upload.FailureReason ?? "one visible attachment was required"}.");
+            }
         }
         else
         {
@@ -143,10 +170,15 @@ public sealed class GptWebProvider : IImageGenerationProvider, ICorrectiveImageG
             if (upload.FailureStage != "Completed" || upload.Attachment1?.AttachmentReady != true ||
                 upload.Attachment1.ObservedAttachmentCount != 1 || upload.Attachment2?.AttachmentReady != true ||
                 upload.Attachment2.ObservedAttachmentCount != 2 || upload.ObservedAttachmentCount != 2)
+            {
+                context.ProviderFailureStage = upload.FailureStage;
                 throw new InvalidOperationException($"GPT corrective attachment contract failed at {upload.FailureStage}: {upload.FailureReason ?? "visible attachment counts 1 then 2 were required"}.");
+            }
             context.AttachmentCountAfterUpload = upload.ObservedAttachmentCount.Value;
         }
 
+        await lifecycle.AdvanceAsync(ProviderOperationState.AttachmentsUploaded, cancellationToken);
+        await ReportStageAsync(lifecycle, "PromptInsertion", cancellationToken);
         var insertion = await _client.InsertAndVerifyPromptAsync(prompt, cancellationToken);
         if (!insertion.PromptContentVerified || !insertion.CanonicalContentMatches || !insertion.InputEventObserved ||
             !insertion.SendButtonDetected || !insertion.SendButtonEnabled)
@@ -162,6 +194,8 @@ public sealed class GptWebProvider : IImageGenerationProvider, ICorrectiveImageG
         context.PromptSendButtonDetected = insertion.SendButtonDetected;
         context.PromptSendButtonEnabled = insertion.SendButtonEnabled;
 
+        await lifecycle.AdvanceAsync(ProviderOperationState.PromptVerified, cancellationToken);
+        await ReportStageAsync(lifecycle, "UsageBudget", cancellationToken);
         var budgetOptions = _options.DualModelRestoration.GptBudget;
         var reservationTime = DateTimeOffset.UtcNow;
         var budget = await _usageRepository.TryReserveAsync(
@@ -179,7 +213,8 @@ public sealed class GptWebProvider : IImageGenerationProvider, ICorrectiveImageG
         // Persist an ambiguity checkpoint immediately before the one allowed
         // Send click. A process crash after this point must not blindly replay
         // the same image generation.
-        await PersistOperationStateAsync(context, ProviderOperationState.GenerationMayExist, cancellationToken);
+        context.ProviderFailureStage = "PromptSubmission";
+        await lifecycle.AdvanceAsync(ProviderOperationState.GenerationMayExist, cancellationToken);
         var submissionTimeout = TimeSpan.FromSeconds(Math.Clamp(_options.SubmissionAcknowledgementTimeoutSeconds, 3, 60));
         var submission = await _client.SubmitPromptOnceAsync(
             prompt, baselineUserMessages, baselineResponses, submissionTimeout, cancellationToken);
@@ -193,7 +228,8 @@ public sealed class GptWebProvider : IImageGenerationProvider, ICorrectiveImageG
         context.SendClickedExactlyOnce = submission.SendClickedExactlyOnce;
         context.SubmissionAcknowledgedAt = submission.SubmissionAcknowledgedAt;
         context.SubmissionAcknowledgementSignal = submission.SubmissionAcknowledgementSignal;
-        context.ConversationPathAfterSubmit = submission.ConversationPathAfterSubmit;
+        if (OpenIMG.Application.Restoration.GenerationRecoveryCheckpoint.IsConversationPath(submission.ConversationPathAfterSubmit))
+            context.ConversationPathAfterSubmit = submission.ConversationPathAfterSubmit;
         context.SubmissionDiagnostics = submission.SubmissionDiagnostics;
         context.UserMessageCountAfterSubmit = submission.UserMessageCountAfterSubmit;
         context.ComposerClearedAfterSubmit = submission.ComposerClearedAfterSubmit;
@@ -206,16 +242,20 @@ public sealed class GptWebProvider : IImageGenerationProvider, ICorrectiveImageG
             {
                 await _usageRepository.ReleaseUnsubmittedReservationAsync(
                     "GPT", context.GenerationOperationId, cancellationToken);
-                await PersistOperationStateAsync(context, OpenIMG.Core.Enums.ProviderOperationState.GenerationPrepared, cancellationToken);
+                await lifecycle.AdvanceAsync(OpenIMG.Core.Enums.ProviderOperationState.GenerationPrepared, cancellationToken);
             }
             context.ProviderFailureStage = submission.FailureStage;
             throw new InvalidOperationException($"GPT prompt submission was not acknowledged at {submission.FailureStage}: {submission.FailureReason ?? "no accepted user message was observed"}.");
         }
-        await PersistOperationStateAsync(context, ProviderOperationState.GenerationSubmitted, cancellationToken);
+        context.ProviderFailureStage = "Generation";
+        if (context.OperationState == ProviderOperationState.GenerationMayExist)
+            await lifecycle.AdvanceAsync(ProviderOperationState.GenerationSubmitted, cancellationToken);
+        await lifecycle.BindConversationAsync(context.ConversationPathAfterSubmit, cancellationToken);
 
-        var generationTimeoutSeconds = context.GenerationTimeoutOverrideSeconds ?? _options.ResponseTimeoutSeconds;
+        var generationTimeoutSeconds = context.GenerationTimeoutOverrideSeconds ?? _options.GptGenerationTimeoutSeconds;
         var imageResult = await _client.WaitForCurrentResponseImageAsync(
             baselineResponses, TimeSpan.FromSeconds(Math.Clamp(generationTimeoutSeconds, 30, 600)), cancellationToken);
+        context.ProviderFailureStage = imageResult.FailureStage;
         context.GenerationStartedAt = imageResult.GenerationStartedAt;
         context.GenerationCompletedAt = imageResult.GenerationCompletedAt;
         context.NewResponseDetected = imageResult.AssistantResponseCount > baselineResponses;
@@ -232,14 +272,39 @@ public sealed class GptWebProvider : IImageGenerationProvider, ICorrectiveImageG
             throw new TimeoutException($"GPT current-response image was not safely completed at {imageResult.FailureStage}: {imageResult.FailureReason ?? "ownership/completion evidence incomplete"}.");
         }
 
+        return await DownloadAndVerifyAsync(imagePaths, prompt, tempDownloadDirectory, lifecycle, false, cancellationToken);
+    }
+
+    private async Task<string> DownloadAndVerifyAsync(
+        IReadOnlyList<string> imagePaths, string prompt, string tempDownloadDirectory,
+        GptOperationLifecycle lifecycle, bool recovery, CancellationToken cancellationToken)
+    {
+        var context = lifecycle.Context;
         var operationDirectory = Path.Combine(tempDownloadDirectory, context.GenerationOperationId);
         Directory.CreateDirectory(operationDirectory);
-        var target = Path.Combine(operationDirectory, "gpt-final.png");
+        if (recovery && context.DownloadedTempPath is { } savedPath && File.Exists(savedPath) &&
+            Path.GetFullPath(savedPath).StartsWith(Path.GetFullPath(operationDirectory) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) &&
+            context.DownloadedCandidateSha256 is { } savedHash &&
+            string.Equals(await ComputeSha256Async(savedPath, cancellationToken), savedHash, StringComparison.OrdinalIgnoreCase))
+        {
+            VerifyImageFile(savedPath);
+            await lifecycle.AdvanceAsync(ProviderOperationState.FileVerified, cancellationToken);
+            return savedPath;
+        }
+        var target = Path.Combine(operationDirectory, recovery ? $"gpt-recovered-{Guid.NewGuid():N}.png" : "gpt-final.png");
         context.DownloadStartedAt = DateTimeOffset.UtcNow;
-        var downloaded = await _client.DownloadLatestGeneratedImageAsync(
-            context.GenerationOperationId, target, TimeSpan.FromSeconds(_options.DownloadTimeoutSeconds), cancellationToken);
+        context.ProviderFailureStage = "Download";
+        await lifecycle.AdvanceAsync(context.OperationState, cancellationToken);
+        var timeout = TimeSpan.FromSeconds(Math.Clamp(_options.DownloadTimeoutSeconds, 5, 120));
+        var downloaded = recovery
+            ? await _client.RecoverGeneratedImageAsync(context.ConversationPathAfterSubmit!, context.BaselineAssistantResponseCount ?? 0,
+                prompt, context.GenerationOperationId, target, timeout, cancellationToken)
+            : await _client.DownloadLatestGeneratedImageAsync(context.GenerationOperationId, target, timeout, cancellationToken);
         if (string.IsNullOrWhiteSpace(downloaded) || !File.Exists(downloaded))
-            throw new FileNotFoundException("GPT generated-image download was not owned by the current operation.", target);
+            throw new FileNotFoundException("GPT generated-image download did not produce a file at the current operation's scoped path.", target);
+        if (!string.Equals(Path.GetFullPath(downloaded), Path.GetFullPath(target), StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("The native download escaped its operation-scoped destination.");
+        VerifyImageFile(downloaded);
 
         context.DownloadCompletedAt = DateTimeOffset.UtcNow;
         context.DownloadOwnedByCurrentOperation = true;
@@ -251,19 +316,27 @@ public sealed class GptWebProvider : IImageGenerationProvider, ICorrectiveImageG
             if (string.Equals(inputHash, context.DownloadedCandidateSha256, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidDataException("GPT returned an image byte-identical to an input instead of a newly generated restoration.");
         }
-        await PersistOperationStateAsync(context, ProviderOperationState.CandidateDownloaded, cancellationToken);
-        _logger.LogInformation("[{OperationId}] GPT image downloaded and operation-owned at {Path}.", context.GenerationOperationId, downloaded);
+        await lifecycle.AdvanceAsync(ProviderOperationState.CandidateDownloaded, cancellationToken);
+        await lifecycle.AdvanceAsync(ProviderOperationState.FileVerified, cancellationToken);
+        context.ProviderFailureStage = "Completed";
+        _logger.LogInformation("[{OperationId}] GPT image downloaded and verified; SHA-256 {Sha256}.", context.GenerationOperationId, context.DownloadedCandidateSha256);
         return downloaded;
     }
 
-    private static async Task PersistOperationStateAsync(
-        GenerationOwnershipContext context,
-        OpenIMG.Core.Enums.ProviderOperationState state,
-        CancellationToken cancellationToken)
+    private static void VerifyImageFile(string path)
     {
-        context.OperationState = state;
-        if (context.PersistOperationStateAsync is not null)
-            await context.PersistOperationStateAsync(state, cancellationToken);
+        using var stream = File.OpenRead(path);
+        var decoder = System.Windows.Media.Imaging.BitmapDecoder.Create(stream,
+            System.Windows.Media.Imaging.BitmapCreateOptions.PreservePixelFormat,
+            System.Windows.Media.Imaging.BitmapCacheOption.OnLoad);
+        if (decoder.Frames.Count == 0 || decoder.Frames[0].PixelWidth <= 0 || decoder.Frames[0].PixelHeight <= 0)
+            throw new InvalidDataException("The completed download is not a supported image.");
+    }
+
+    private static async Task ReportStageAsync(GptOperationLifecycle lifecycle, string stage, CancellationToken cancellationToken)
+    {
+        lifecycle.Context.ProviderFailureStage = stage;
+        await lifecycle.AdvanceAsync(lifecycle.Context.OperationState, cancellationToken);
     }
 
     private static async Task<string> ComputeSha256Async(string path, CancellationToken cancellationToken)

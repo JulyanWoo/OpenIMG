@@ -4,8 +4,23 @@ namespace OpenIMG.App.Browser;
 /// GPT-specific DOM contract. Selectors are isolated here so the application
 /// workflow never depends on ChatGPT markup.
 /// </summary>
-internal static class GptDomAdapter
+internal static partial class GptDomAdapter
 {
+    public const string DownloadControlSnapshotScript = @"
+JSON.stringify((function(){
+  function visible(el) {
+    var r=el.getBoundingClientRect(), s=window.getComputedStyle(el);
+    var hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);
+    return r.width>0 && r.height>0 && s.visibility!=='hidden' && s.display!=='none' && Number(s.opacity)>0 && !!hit && (hit===el || el.contains(hit));
+  }
+  return Array.from(document.querySelectorAll('button,a,[role=""button""]')).map(function(el){
+    var r=el.getBoundingClientRect();
+    if(!el.__openimgDownloadControlToken) el.__openimgDownloadControlToken=(window.crypto&&crypto.randomUUID)?crypto.randomUUID():'openimg-'+Date.now()+'-'+Math.random().toString(36).slice(2);
+    return {ariaLabel:el.getAttribute('aria-label'),title:el.getAttribute('title'),text:(el.innerText||'').trim().slice(0,80),
+      testId:el.getAttribute('data-testid'),elementToken:el.__openimgDownloadControlToken,visible:visible(el),inDialog:!!el.closest('[role=""dialog""]'),x:r.x+r.width/2,y:r.y+r.height/2};
+  }).filter(function(item){return /download|descargar|guardar imagen|save image/i.test([item.ariaLabel,item.title,item.text,item.testId].filter(Boolean).join(' '));});
+})())";
+
     public const string AttachmentUiSnapshotScript = @"
 JSON.stringify((function(){
   function visible(el) { var r=el.getBoundingClientRect(), s=window.getComputedStyle(el); return r.width>0 && r.height>0 && s.visibility!=='hidden' && s.display!=='none'; }
@@ -62,9 +77,15 @@ JSON.stringify((function(){
   var loginLinkOrButton = Array.from(document.querySelectorAll('a[href*=""/auth/login""], button[aria-label*=""log in"" i], button[aria-label*=""sign in"" i], button[aria-label*=""iniciar sesión"" i]')).some(visible);
   var identityField = Array.from(document.querySelectorAll('input[type=""password""], input[autocomplete=""username"" i], input[autocomplete=""email"" i], input[name=""username"" i], input[name=""email"" i]')).some(visible);
   var identityAction = Array.from(document.querySelectorAll('button, a, [role=""button""]')).some(function(el){
-    return visible(el) && /sign in|log in|continue with|choose an account|iniciar sesión|acceder|continuar/i.test((el.innerText||'')+' '+(el.getAttribute('aria-label')||''));
+    if(!visible(el)) return false;
+    var label=((el.innerText||'')+' '+(el.getAttribute('aria-label')||'')+' '+(el.getAttribute('title')||'')).replace(/\s+/g,' ').trim();
+    return /^(sign in|log in|iniciar sesión|iniciar sesion|acceder)( to chatgpt)?$/i.test(label) ||
+      /^(continue with|continuar con) (google|apple|microsoft)$/i.test(label);
   });
-  var login = loginLinkOrButton || identityField || (!composer && identityAction);
+  // A sign-in overlay can coexist with a landing-page composer. Authentication
+  // evidence must take precedence; composer visibility alone is not proof of a
+  // signed-in session.
+  var login = loginLinkOrButton || identityField || identityAction;
   var body = document.body;
   var text = body ? (body.innerText || '') : '';
   var blocking = /rate limit|usage limit|too many requests|something went wrong/i.test(text);
@@ -84,8 +105,19 @@ JSON.stringify((function(){
   };
 })())";
 
+    public const string CanonicalConversationPathFunction = """
+    function(path) {
+      if(typeof path!=='string')return null;
+      path=path.replace(/\/+$/,'');
+      if(!path.startsWith('/c/')||path.length<=3)return null;
+      try {var identifier=decodeURIComponent(path.slice(3));return !/^local-chatgpt:/i.test(identifier)&&/^[A-Za-z0-9._~!$&'()*+,;=:@-]+$/.test(identifier)&&identifier!=='.'&&identifier!=='..'?'/c/'+identifier:null;}
+      catch(_) {return null;}
+    }
+    """;
+
     public const string HelperScript = @"
 window.__openimg_gpt = {
+  canonicalConversationPath: " + CanonicalConversationPathFunction + @",
   findComposer: function() {
     var candidates = Array.from(document.querySelectorAll('textarea[data-testid*=""textbox"" i], textarea[placeholder*=""message"" i], textarea[placeholder*=""mensaje"" i], div[contenteditable=""true""][data-testid*=""textbox"" i], div[contenteditable=""true""], textarea'));
     return candidates.find(function(el) { var r = el.getBoundingClientRect(); var s = window.getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none'; }) || null;
@@ -147,16 +179,31 @@ window.__openimg_gpt = {
     });
   },
   countAssistantResponses: function() {
-    return Math.max(document.querySelectorAll('[data-message-author-role=""assistant""]').length,
-      document.querySelectorAll('[data-testid=""generated-image-gallery""]').length);
+    var direct = document.querySelectorAll('[data-message-author-role=""assistant""], [data-testid*=""assistant-message"" i]');
+    var turns = Array.from(document.querySelectorAll('article, [data-testid*=""conversation-turn"" i]')).filter(function(t,i){
+      var r=t.getAttribute('data-message-author-role');
+      return r==='assistant'||(!r&&i%2===1);
+    });
+    return Math.max(direct.length, turns.length, document.querySelectorAll('[data-testid=""generated-image-gallery""]').length);
   },
   countUserMessages: function() {
-    return document.querySelectorAll('[data-message-author-role=""user""]').length;
+    var direct = document.querySelectorAll('[data-message-author-role=""user""], [data-testid*=""user-message"" i]');
+    var turns = Array.from(document.querySelectorAll('article, [data-testid*=""conversation-turn"" i]')).filter(function(t,i){
+      var r=t.getAttribute('data-message-author-role');
+      return r==='user'||(!r&&i%2===0);
+    });
+    return Math.max(direct.length, turns.length);
   },
   submissionState: function(expectedPrompt) {
     function visible(el) { if (!el) return false; var r=el.getBoundingClientRect(), s=getComputedStyle(el); return r.width>0 && r.height>0 && s.visibility!=='hidden' && s.display!=='none'; }
     function canonical(value) { return (value||'').normalize('NFKC').replace(/[\u200B\u200C\u200D\uFEFF]/g,'').replace(/\s+/gu,' ').trim(); }
-    var users=Array.from(document.querySelectorAll('[data-message-author-role=""user""]'));
+    var users=Array.from(document.querySelectorAll('[data-message-author-role=""user""], [data-testid*=""user-message"" i]'));
+    if(!users.length){
+      users=Array.from(document.querySelectorAll('article, [data-testid*=""conversation-turn"" i]')).filter(function(t,i){
+        var r=t.getAttribute('data-message-author-role');
+        return r==='user'||(!r&&i%2===0);
+      });
+    }
     var lastUser=users.length ? users[users.length-1] : null;
     var composer=window.__openimg_gpt.findComposer();
     var composerText=composer ? (composer.value || composer.innerText || composer.textContent || '') : '';
@@ -166,14 +213,12 @@ window.__openimg_gpt = {
     var sendForm=send ? send.closest('form') : null;
     var conversationTurns=document.querySelectorAll('[data-testid*=""conversation-turn"" i]').length;
     var alerts=Array.from(document.querySelectorAll('[role=""alert""],[data-sonner-toast]')).filter(visible);
-    var stop=Array.from(document.querySelectorAll('button,[role=""button""]')).some(function(el){
-      var label=((el.getAttribute('aria-label')||'')+' '+(el.getAttribute('title')||'')+' '+(el.innerText||'')).toLowerCase();
-      return visible(el) && /stop generating|stop response|detener generaci[oó]n|detener respuesta/.test(label);
-    });
+    var generation=window.__openimg_gpt.generationState();
     return {conversationPath:location.pathname,userMessageCount:users.length,
       lastUserMessageMatchesPrompt:!!lastUser && canonical(lastUser.innerText||lastUser.textContent||'')===canonical(expectedPrompt),
       composerEmpty:!composerText.trim(), composerAttachmentCount:previews.filter(visible).length,
-      stopControlDetected:stop, sendButtonDisabled:!!send && (send.disabled || send.getAttribute('aria-disabled')==='true'),
+      stopControlDetected:generation.stopControlDetected, generationActive:generation.generationActive,
+      sendButtonDisabled:!!send && (send.disabled || send.getAttribute('aria-disabled')==='true'),
       diagnostics:{path:location.pathname,bodyTextLength:document.body ? (document.body.innerText||'').length : 0,
         conversationTurnCount:conversationTurns,alertCount:alerts.length,composerPresent:!!composer,
         composerTextLength:composerText.length,sendButtonPresent:!!send,
@@ -188,34 +233,62 @@ window.__openimg_gpt = {
       return src && !src.startsWith('blob:') && !alt.includes('avatar') && !alt.includes('profile') && img.getBoundingClientRect().width > 120;
     }).length;
   },
+  currentAssistantImages: function(baselineResponseCount) {
+    var messages=Array.from(document.querySelectorAll('[data-message-author-role=""assistant""]'));
+    var users=Array.from(document.querySelectorAll('[data-message-author-role=""user""]'));
+    var scopes=messages.slice(baselineResponseCount).map(function(message){return message.closest('article,[data-testid*=""conversation-turn""]') || message;});
+    // Fresh one-message conversations may render A/B image galleries outside
+    // the assistant text node. Both alternatives still belong to this turn.
+    if(baselineResponseCount===0 && users.length===1) {
+      Array.from(document.querySelectorAll('[data-testid=""generated-image-gallery""]')).forEach(function(gallery){
+        if(!gallery.closest('[data-message-author-role=""user""],form') &&
+          (users[0].compareDocumentPosition(gallery)&Node.DOCUMENT_POSITION_FOLLOWING)) scopes.push(gallery);
+      });
+    }
+    var seen=new Set(), images=[];
+    scopes.forEach(function(scope){Array.from(scope.querySelectorAll('img')).forEach(function(image){
+      var src=image.currentSrc || image.getAttribute('src') || '', r=image.getBoundingClientRect(), s=getComputedStyle(image);
+      var generated=!!image.closest('[data-testid=""generated-image-gallery""]');
+      if(src && !seen.has(src) && image.naturalWidth>120 && image.naturalHeight>120 && r.width>0 && r.height>0 &&
+        s.display!=='none' && s.visibility!=='hidden' && !image.closest('[data-message-author-role=""user""],form') &&
+        (generated || !/^(blob:|data:image\/)/i.test(src)) && !/avatar|profile/i.test(image.alt||'')) {
+        seen.add(src); images.push(image);
+      }
+    });});
+    return images.sort(function(a,b){return a===b ? 0 : a.compareDocumentPosition(b)&Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;});
+  },
+  generationState: function() {
+    var visible = function(el) { var r=el.getBoundingClientRect(), s=getComputedStyle(el); return r.width>0 && r.height>0 && s.visibility!=='hidden' && s.display!=='none' && Number(s.opacity)>0; };
+    var stop = Array.from(document.querySelectorAll('button,[role=""button""]')).some(function(button) {
+      var label = ((button.getAttribute('aria-label') || '') + ' ' + (button.getAttribute('title') || '') + ' ' + (button.innerText || '') + ' ' + (button.getAttribute('data-testid') || '')).toLowerCase();
+      return visible(button) && /stop|detener/.test(label);
+    });
+    var thinking = Array.from(document.querySelectorAll('*')).some(function(el) {
+      if(el.children.length || el.closest('[data-message-author-role=""user""],form'))return false;
+      var text = (el.innerText || el.textContent || '').trim().toLowerCase();
+      return (text === 'pensando' || text === 'thinking' || text.startsWith('pensando') || text.startsWith('thinking')) &&
+        visible(el);
+    });
+    return {stopControlDetected:stop, generationActive:stop || thinking};
+  },
   currentAssistantImageState: function(baselineResponseCount) {
     var messages = Array.from(document.querySelectorAll('[data-message-author-role=""assistant""]'));
     var galleries = Array.from(document.querySelectorAll('[data-testid=""generated-image-gallery""]'));
     var responseCount = Math.max(messages.length, galleries.length);
     var current = messages.length ? messages[messages.length - 1] : (galleries.length ? galleries[galleries.length - 1] : null);
-    var isGeneratedGallery = !!current && current.getAttribute('data-testid') === 'generated-image-gallery';
-    var images = current ? Array.from(current.querySelectorAll('img')).filter(function(img) {
-      var src = img.getAttribute('src') || '';
-      var r = img.getBoundingClientRect();
-      return src && img.naturalWidth > 120 && img.naturalHeight > 120 &&
-        (isGeneratedGallery || !/^(blob:|data:image\/)/i.test(src)) && r.width > 120 && r.height > 120;
-    }) : [];
-    var active = Array.from(document.querySelectorAll('button,[role=""button""]')).some(function(button) {
-      var label = ((button.getAttribute('aria-label') || '') + ' ' + (button.getAttribute('title') || '') + ' ' + (button.innerText || '')).toLowerCase();
-      var r = button.getBoundingClientRect();
-      var style = window.getComputedStyle(button);
-      return r.width > 0 && r.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' &&
-        /stop generating|stop response|detener generaci[oó]n|detener respuesta/.test(label);
-    });
+    var images = window.__openimg_gpt.currentAssistantImages(baselineResponseCount);
+    var active = window.__openimg_gpt.generationState().generationActive;
     var responseText = current ? (current.innerText || '').toLowerCase() : '';
     var pageText = (document.body ? (document.body.innerText || '') : '').toLowerCase();
-    var rateLimited = /usage limit|limit reached|too many requests|l[ií]mite de uso|l[ií]mite alcanzado/.test(responseText + ' ' + pageText);
+    var visible = function(el) { var r=el.getBoundingClientRect(), s=getComputedStyle(el); return r.width>0 && r.height>0 && s.visibility!=='hidden' && s.display!=='none'; };
+    var providerWarning = Array.from(document.querySelectorAll('[role=""alert""],[data-sonner-toast],[data-testid*=""error"" i],[data-testid*=""warning"" i]')).some(visible);
+    var rateLimited = /rate[ -]?limit|usage limit|limit reached|reached (?:your|the) (?:image )?(?:generation )?limit|hit (?:your|the) (?:image )?(?:generation )?limit|too many requests|try again (?:later|in \d+|at )|l[ií]mite (?:de uso|alcanzado|diario)|alcanzaste el l[ií]mite/.test(responseText + ' ' + pageText);
     var generationUnavailable = /image generation unavailable|generaci[oó]n de im[aá]genes no est[aá] disponible/.test(responseText);
     var providerUnavailable = /service unavailable|temporarily unavailable|servicio no disponible|int[eé]ntalo m[aá]s tarde/.test(responseText);
     return {responseCount: responseCount, newResponse: responseCount > baselineResponseCount,
       currentResponseImageCount: images.length, currentResponseOwnedImage: responseCount > baselineResponseCount && images.length > 0,
       generationActive: active, rateLimited: rateLimited, generationUnavailable: generationUnavailable,
-      providerUnavailable: providerUnavailable};
+      providerUnavailable: providerUnavailable, providerWarning: providerWarning};
   },
   insertComposerText: function(text) {
     var el = window.__openimg_gpt.findComposer();
